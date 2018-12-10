@@ -59,6 +59,7 @@ module Raft
   , RaftLogExceptions(..)
 
   -- * Logging
+  , LogCtx(..)
   , LogDest(..)
   , Severity(..)
 
@@ -141,7 +142,7 @@ data RaftEnv v m = RaftEnv
   , resetElectionTimer :: m ()
   , resetHeartbeatTimer :: m ()
   , raftNodeConfig :: NodeConfig
-  , raftNodeLogDest :: LogDest
+  , raftNodeLogCtx :: LogCtx
   }
 
 newtype RaftT v m a = RaftT
@@ -172,10 +173,10 @@ runRaftT raftNodeState raftEnv =
 ------------------------------------------------------------------------------
 
 logDebug :: MonadIO m => Text -> RaftT v m ()
-logDebug msg = flip logDebugIO msg =<< asks raftNodeLogDest
+logDebug msg = flip logDebugIO msg =<< asks raftNodeLogCtx
 
 logCritical :: MonadIO m => Text -> RaftT v m ()
-logCritical msg = flip logCriticalIO msg =<< asks raftNodeLogDest
+logCritical msg = flip logCriticalIO msg =<< asks raftNodeLogCtx
 
 ------------------------------------------------------------------------------
 
@@ -196,11 +197,11 @@ runRaftNode
      , Exception (RaftPersistError m)
      )
    => NodeConfig           -- ^ Node configuration
-   -> LogDest              -- ^ Logs destination
+   -> LogCtx               -- ^ Logs destination
    -> Int                  -- ^ Timer seed
    -> sm                   -- ^ Initial state machine state
    -> m ()
-runRaftNode nodeConfig@NodeConfig{..} logDest timerSeed initRSM = do
+runRaftNode nodeConfig@NodeConfig{..} logCtx timerSeed initRSM = do
   eventChan <- atomically newTChan
 
   electionTimer <- newTimerRange timerSeed configElectionTimeout
@@ -208,7 +209,7 @@ runRaftNode nodeConfig@NodeConfig{..} logDest timerSeed initRSM = do
 
   let resetElectionTimer = resetTimer electionTimer
       resetHeartbeatTimer = resetTimer heartbeatTimer
-      raftEnv = RaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logDest
+      raftEnv = RaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx
 
   runRaftT initRaftNodeState raftEnv $ do
 
@@ -473,8 +474,8 @@ handleLogs
   => [LogMsg]
   -> RaftT v m ()
 handleLogs logs = do
-  logDest <- asks raftNodeLogDest
-  mapM_ (logToDest logDest) logs
+  logCtx <- asks raftNodeLogCtx
+  mapM_ (logToDest logCtx) logs
 
 ------------------------------------------------------------------------------
 -- Event Producers
