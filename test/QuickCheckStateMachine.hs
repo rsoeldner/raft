@@ -13,11 +13,11 @@ import           Control.Monad.IO.Class        (liftIO)
 import           Data.Bifunctor                (bimap)
 import           Data.Char                     (isDigit)
 import           Data.List                     (isInfixOf, (\\))
-import           Data.Maybe                    (isJust, isNothing)
+import           Data.Maybe                    (isJust)
 import qualified Data.Set                      as Set
 import           Data.TreeDiff                 (ToExpr)
 import           GHC.Generics                  (Generic, Generic1)
-import           Prelude
+import           Prelude                       hiding (notElem)
 import           System.Directory              (removePathForcibly)
 import           System.IO                     (BufferMode (NoBuffering),
                                                 Handle, IOMode (WriteMode),
@@ -40,7 +40,7 @@ import           Test.QuickCheck.Monadic       (monadicIO)
 import           Test.StateMachine             (Concrete, GenSym, Logic (..),
                                                 Opaque (..), Reason (Ok),
                                                 Reference, StateMachine (..),
-                                                Symbolic, forAllCommands,
+                                                Symbolic, forAllCommands, notElem,
                                                 genSym, opaque, prettyCommands,
                                                 reference, runCommands, (.&&),
                                                 (.//), (.<), (.==), (.>=))
@@ -80,14 +80,14 @@ data Model (r :: * -> *) = Model
   { nodes    :: [(Port, Reference (Opaque ProcessHandle) r)]
   , started  :: Bool
   , value    :: Maybe Integer
-  , isolated :: Maybe (Port, Reference (Opaque ProcessHandle) r)
+  , isolated :: [(Port, Reference (Opaque ProcessHandle) r)]
   }
   deriving (Show, Generic)
 
 deriving instance ToExpr (Model Concrete)
 
 initModel :: Model r
-initModel = Model [] False Nothing Nothing
+initModel = Model [] False Nothing []
 
 transition :: Model r -> Action r -> Response r -> Model r
 transition Model {..} act resp = case (act, resp) of
@@ -101,8 +101,8 @@ transition Model {..} act resp = case (act, resp) of
   (Set i, Ack)                     -> Model { value = Just i, .. }
   (Read, Value _i)                 -> Model {..}
   (Incr, Ack)                      -> Model { value = succ <$> value, ..}
-  (BreakConnection ph, BrokeConnection) -> Model { isolated = Just ph, .. }
-  (FixConnection _ph, FixedConnection)  -> Model { isolated = Nothing, .. }
+  (BreakConnection node, BrokeConnection) -> Model { isolated = node:isolated, .. }
+  (FixConnection (port,_), FixedConnection)  -> Model { isolated = filter ((/= port) . fst) isolated, .. }
   (Read, Timeout)                  -> Model {..}
   (Set {}, Timeout)                -> Model {..}
   (Incr {}, Timeout)               -> Model {..}
@@ -115,8 +115,8 @@ precondition Model {..} act = case act of
   Set i              -> length nodes .== 3 .&& i .>= 0
   Read               -> length nodes .== 3 .&& Boolean (isJust value)
   Incr               -> length nodes .== 3 .&& Boolean (isJust value)
-  BreakConnection {} -> length nodes .== 3 .&& Boolean (isNothing isolated)
-  FixConnection   {} -> length nodes .== 3 .&& Boolean (isJust isolated)
+  BreakConnection (port, _) -> length nodes .== 3 .&& port `notElem` map fst isolated
+  FixConnection   {} -> length nodes .== 3 .&& Boolean (not (null isolated))
 
 postcondition :: Model Concrete -> Action Concrete -> Response Concrete -> Logic
 postcondition Model {..} act resp = case (act, resp) of
@@ -129,9 +129,9 @@ postcondition Model {..} act resp = case (act, resp) of
   (Incr {}, Ack)                 -> Top
   (BreakConnection {}, BrokeConnection) -> Top
   (FixConnection {}, FixedConnection)   -> Top
-  (Read,    Timeout)             -> Boolean (isJust isolated) .// "Read timeout"
-  (Set {},  Timeout)             -> Boolean (isJust isolated) .// "Set timeout"
-  (Incr {}, Timeout)             -> Boolean (isJust isolated) .// "Incr timeout"
+  (Read,    Timeout)             -> Boolean (not (null isolated)) .// "Read timeout"
+  (Set {},  Timeout)             -> Boolean (not (null isolated)) .// "Set timeout"
+  (Incr {}, Timeout)             -> Boolean (not (null isolated)) .// "Incr timeout"
   (_,            _)              -> Bot .// "postcondition"
 
 command :: Handle -> String -> IO (Maybe String)
@@ -268,8 +268,8 @@ generator Model {..}
                    , (1, KillNode <$> elements nodes)
                    , (1, BreakConnection <$> elements nodes)
                    ] ++ case isolated of
-                          Just node -> [(1, pure (FixConnection node))]
-                          Nothing   -> []
+                          [] -> []
+                          _ -> [(1, FixConnection <$> elements isolated)]
 
 shrinker :: Action Symbolic -> [Action Symbolic]
 shrinker (Set i) = [ Set i' | i' <- shrink i ]
