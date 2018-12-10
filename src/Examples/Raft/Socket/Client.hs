@@ -7,7 +7,6 @@ module Examples.Raft.Socket.Client where
 
 import Protolude
 
-import Control.Concurrent.Classy
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as N
 import qualified Data.Set as Set
@@ -53,7 +52,7 @@ sendRead _  nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
       clientId = ClientId (hostPortToNid (clientHost, clientPort))
-  liftIO $ fork $ N.connect host port $ \(sock, sockAddr) -> N.send sock
+  liftIO $ N.connect host port $ \(sock, sockAddr) -> N.send sock
     (S.encode (ClientRequestEvent (ClientRequest clientId ClientReadReq :: ClientRequest v)))
   acceptClientConnections
 
@@ -63,7 +62,7 @@ sendWrite cmd nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
       clientId = ClientId (hostPortToNid (clientHost, clientPort))
-  liftIO $ fork $ N.connect host port $ \(sock, sockAddr) -> N.send sock
+  liftIO $ N.connect host port $ \(sock, sockAddr) -> N.send sock
     (S.encode (ClientRequestEvent (ClientRequest clientId (ClientWriteReq cmd))))
   acceptClientConnections
 
@@ -76,4 +75,3 @@ acceptClientConnections = do
     case recvSockM of
       Nothing -> pure $ Left "Received empty data from socket"
       Just recvSock -> pure (S.decode recvSock)
-

@@ -248,13 +248,14 @@ main = do
       nEnv <- initNodeEnv nid
       runRaftExampleM nEnv nSocketEnv nPersistentEnv $ do
         let allNodeIds = Set.fromList (nid : nids)
+        let (host, port) = RS.nidToHostPort (toS nid)
         let nodeConfig = NodeConfig
                           { configNodeId = toS nid
                           , configNodeIds = allNodeIds
                           , configElectionTimeout = (1500000, 3000000)
                           , configHeartbeatTimeout = 200000
                           }
-        RaftExampleM $ lift acceptForkNode :: RaftExampleM Store StoreCmd ()
+        fork $ RaftExampleM $ lift (serveClientReqs host port)
         electionTimerSeed <- liftIO randomIO
         runRaftNode nodeConfig LogStdout electionTimerSeed (mempty :: Store)
 
@@ -314,17 +315,12 @@ main = do
 
     initSocketEnv :: NodeId -> IO (NodeSocketEnv v)
     initSocketEnv nid = do
-      let (host, port) = RS.nidToHostPort (toS nid)
-      nodeSocket <- newSock host port
-      socketPeersTVar <- atomically (newTVar mempty)
       msgQueue <- atomically newTChan
       clientReqQueue <- atomically newTChan
       pure NodeSocketEnv
-            { nsPeers = socketPeersTVar
-            , nsSocket = nodeSocket
-            , nsMsgQueue = msgQueue
-            , nsClientReqQueue = clientReqQueue
-            }
+        { nsMsgQueue = msgQueue
+        , nsClientReqQueue = clientReqQueue
+        }
 
     clientMainHandler :: IO ()
     clientMainHandler = do
