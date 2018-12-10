@@ -7,6 +7,8 @@ module Examples.Raft.Socket.Client where
 
 import Protolude
 
+import qualified Control.Monad.Catch
+
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as N
 import qualified Data.Set as Set
@@ -52,9 +54,13 @@ sendRead _  nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
       clientId = ClientId (hostPortToNid (clientHost, clientPort))
-  liftIO $ N.connect host port $ \(sock, sockAddr) -> N.send sock
-    (S.encode (ClientRequestEvent (ClientRequest clientId ClientReadReq :: ClientRequest v)))
-  acceptClientConnections
+  eRes <-
+    liftIO $ Control.Monad.Catch.try $
+      N.connect host port $ \(sock, sockAddr) -> N.send sock . S.encode $
+        ClientRequestEvent (ClientRequest clientId ClientReadReq :: ClientRequest v)
+  case eRes of
+    Left (err :: SomeException) -> pure $ Left ("Failed to send ClientReadReq: " <> show err)
+    Right _ -> acceptClientConnections
 
 -- | Write to a node. It blocks until the node responds
 sendWrite :: (S.Serialize v, S.Serialize sm) => v -> NodeId -> RaftSocketClientM (Either [Char] (ClientResponse sm))
@@ -62,9 +68,13 @@ sendWrite cmd nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
       clientId = ClientId (hostPortToNid (clientHost, clientPort))
-  liftIO $ N.connect host port $ \(sock, sockAddr) -> N.send sock
-    (S.encode (ClientRequestEvent (ClientRequest clientId (ClientWriteReq cmd))))
-  acceptClientConnections
+  eRes <-
+    liftIO $ Control.Monad.Catch.try $
+      N.connect host port $ \(sock, sockAddr) -> N.send sock . S.encode $
+        ClientRequestEvent (ClientRequest clientId (ClientWriteReq cmd))
+  case eRes of
+    Left (err :: SomeException) -> pure $ Left ("Failed to send ClientWriteReq: " <> show err)
+    Right _ -> acceptClientConnections
 
 -- | Accept a connection and return the client response synchronously
 acceptClientConnections :: S.Serialize sm => RaftSocketClientM (Either [Char] (ClientResponse sm))
