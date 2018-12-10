@@ -135,18 +135,17 @@ postcondition Model {..} act resp = case (act, resp) of
   (_,            _)              -> Bot .// "postcondition"
 
 command :: Handle -> String -> IO (Maybe String)
-command h cmd = go 20
+command h cmd = go
   where
-    go :: Int -> IO (Maybe String)
-    go 0 = return Nothing
-    go n = do
+    go :: IO (Maybe String)
+    go = do
       let cp =
             (proc "stack" ["exec", "raft-example", "client"])
               { std_in  = CreatePipe
               , std_out = CreatePipe
               , std_err = CreatePipe -- XXX: UseHandle h
               }
-      res <-
+      eRes <-
         withCreateProcess cp $ \(Just hin) (Just hout) _herr _ph -> do
           threadDelay 100000
           hSetBuffering hin  NoBuffering
@@ -158,26 +157,23 @@ command h cmd = go 20
           hPutStrLn hin cmd
           mresp <- getResponse hout
           case mresp of
-            Nothing   -> do
-              hPutStrLn h ("timeout, retrying to send command: " ++ cmd)
-              threadDelay 500000
-              pure (Left (n - 1))
+            Nothing   -> pure Nothing
             Just resp ->
               if "system doesn't have a leader" `isInfixOf` resp
               then do
                 hPutStrLn h "No leader, retrying..."
-                threadDelay 100000
-                pure (Left n)
+                threadDelay 100000 >> pure (Just Nothing)
               else do
                 hPutStrLn h ("got response `" ++ resp ++ "'")
-                return (Right (Just resp))
-      case res of
-        Left n -> go n
-        Right m -> pure m
+                pure (Just (Just resp))
+      case eRes of
+        Nothing -> pure Nothing
+        Just Nothing -> go
+        Just (Just resp) -> pure (Just resp)
       where
         getResponse :: Handle -> IO (Maybe String)
         getResponse hout = do
-          mline <- timeout 500000 (hGetLine hout)
+          mline <- timeout 1000000 (hGetLine hout)
           case mline of
             Nothing   -> return Nothing
             Just line
