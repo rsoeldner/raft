@@ -59,6 +59,7 @@ module Raft
   , RaftLogExceptions(..)
   , RaftReadLogErr(..)
   , RaftWriteLogErr(..)
+  , RaftDeleteLogErr(..)
 
   -- * Logging
   , LogCtx(..)

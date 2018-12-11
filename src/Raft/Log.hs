@@ -117,22 +117,28 @@ class (Show (RaftWriteLogErr m), Monad m) => RaftWriteLog m v where
 
 data DeleteSuccess v = DeleteSuccess
 
+data RaftDeleteLogErr m
+  = RaftDeleteLogError (RaftDeleteLogError m)
+  | RaftDeleteLogErrorInternal Text
+
+deriving instance Show (RaftDeleteLogError m) => Show (RaftDeleteLogErr m)
+deriving instance (Typeable m, Exception (RaftDeleteLogError m)) => Exception (RaftDeleteLogErr m)
+
+-- | Provides an interface for nodes to delete log entries from storage.
+class (Show (RaftDeleteLogErr m), Monad m) => RaftDeleteLog m v where
+  type RaftDeleteLogError m
+  -- | Delete log entries from a given index; e.g. 'deleteLogEntriesFrom 7'
+  -- should delete every log entry with an index >= 7.
+  deleteLogEntriesFrom
+    :: Exception (RaftDeleteLogErr m)
+    => Index -> m (Either (RaftDeleteLogErr m) (DeleteSuccess v))
+
 data RaftReadLogErr m
   = RaftReadLogError (RaftReadLogError m)
   | RaftReadLogErrorInternal Text
 
 deriving instance Show (RaftReadLogError m) => Show (RaftReadLogErr m)
 deriving instance (Typeable m, Exception (RaftReadLogError m)) => Exception (RaftReadLogErr m)
-
-
--- | Provides an interface for nodes to delete log entries from storage.
-class (Show (RaftDeleteLogError m), Monad m) => RaftDeleteLog m v where
-  type RaftDeleteLogError m
-  -- | Delete log entries from a given index; e.g. 'deleteLogEntriesFrom 7'
-  -- should delete every log entry with an index >= 7.
-  deleteLogEntriesFrom
-    :: Exception (RaftDeleteLogError m)
-    => Index -> m (Either (RaftDeleteLogError m) (DeleteSuccess v))
 
 -- | Provides an interface for nodes to read log entries from storage.
 class (Show (RaftReadLogErr m), Monad m) => RaftReadLog m v where
@@ -181,7 +187,7 @@ type RaftLogExceptions m = (Exception (RaftReadLogErr m), Exception (RaftWriteLo
 data RaftLogError m where
   RaftLogReadError :: Show (RaftReadLogErr m) => RaftReadLogErr m -> RaftLogError m
   RaftLogWriteError :: Show (RaftWriteLogErr m) => RaftWriteLogErr m -> RaftLogError m
-  RaftLogDeleteError :: Show (RaftDeleteLogError m) => RaftDeleteLogError m -> RaftLogError m
+  RaftLogDeleteError :: Show (RaftDeleteLogErr m) => RaftDeleteLogErr m -> RaftLogError m
 
 deriving instance Show (RaftLogError m)
 

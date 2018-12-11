@@ -129,7 +129,7 @@ instance RaftWriteLog (RaftExampleM Store StoreCmd) StoreCmd where
 instance RaftPersist (RaftExampleM Store StoreCmd) where
   type RaftPersistError (RaftExampleM Store StoreCmd) = NodeEnvError
   writePersistentState ps = RaftExampleM $ lift $ RaftSocketT (lift $ writePersistentState ps)
-  readPersistentState = RaftExampleM $ lift $ RaftSocketT (lift $ readPersistentState)
+  readPersistentState = RaftExampleM $ lift $ RaftSocketT (lift readPersistentState)
 
 instance RaftReadLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftReadLogError (RaftExampleM Store StoreCmd) = NodeEnvError
@@ -144,7 +144,11 @@ instance RaftReadLog (RaftExampleM Store StoreCmd) StoreCmd where
 
 instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftDeleteLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  deleteLogEntriesFrom idx = RaftExampleM $ lift $ RaftSocketT (lift $ deleteLogEntriesFrom idx)
+  deleteLogEntriesFrom idx
+    = deleteLogEntriesFrom idx :: RaftExampleM Store StoreCmd
+				   (Either
+				     (RaftDeleteLogErr (RaftExampleM Store StoreCmd))
+				     (DeleteSuccess StoreCmd))
 
 --------------------
 -- Client console --

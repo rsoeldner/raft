@@ -54,7 +54,7 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       aeData <- mkAppendEntriesData newLeaderState (FromIndex newNextIndex)
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
-  | otherwise = do
+  | otherwise =
       case aerReadRequest appendEntriesResp of
         Nothing -> do
           let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
