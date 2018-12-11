@@ -99,13 +99,21 @@ validateLog es =
           Left (InvalidPrevHash expectedHash currHash)
       | otherwise = Right ()
 
+
+data RaftWriteLogErr m
+  = RaftWriteLogError (RaftWriteLogError m)
+  | RaftWriteLogErrorInternal Text
+
+deriving instance Show (RaftWriteLogError m) => Show (RaftWriteLogErr m)
+deriving instance (Typeable m, Exception (RaftWriteLogError m)) => Exception (RaftWriteLogErr m)
+
 -- | Provides an interface for nodes to write log entries to storage.
-class (Show (RaftWriteLogError m), Monad m) => RaftWriteLog m v where
+class (Show (RaftWriteLogErr m), Monad m) => RaftWriteLog m v where
   type RaftWriteLogError m
   -- | Write the given log entries to storage
   writeLogEntries
-    :: Exception (RaftWriteLogError m)
-    => Entries v -> m (Either (RaftWriteLogError m) ())
+    :: Exception (RaftWriteLogErr m)
+    => Entries v -> m (Either (RaftWriteLogErr m) ())
 
 data DeleteSuccess v = DeleteSuccess
 
@@ -162,7 +170,7 @@ class (Show (RaftReadLogErr m), Monad m) => RaftReadLog m v where
             eLogEntry <- readLogEntry idx'
             case eLogEntry of
               Left err -> pure (Left err)
-              Right Nothing -> pure (Left (RaftReadLogErrorInternal "Malformed log"))
+              Right Nothing -> pure (Left (RaftReadLogErrorInternal $ "Malformed log on index: " <> show idx'))
               Right (Just logEntry) -> fmap (|> logEntry) <$>  go (decrIndexWithDefault0 idx')
 
 type RaftLog m v = (RaftReadLog m v, RaftWriteLog m v, RaftDeleteLog m v)
@@ -172,7 +180,7 @@ type RaftLogExceptions m = (Exception (RaftReadLogErr m), Exception (RaftWriteLo
 -- deleting logs from the persistent storage
 data RaftLogError m where
   RaftLogReadError :: Show (RaftReadLogErr m) => RaftReadLogErr m -> RaftLogError m
-  RaftLogWriteError :: Show (RaftWriteLogError m) => RaftWriteLogError m -> RaftLogError m
+  RaftLogWriteError :: Show (RaftWriteLogErr m) => RaftWriteLogErr m -> RaftLogError m
   RaftLogDeleteError :: Show (RaftDeleteLogError m) => RaftDeleteLogError m -> RaftLogError m
 
 deriving instance Show (RaftLogError m)
@@ -181,6 +189,7 @@ updateLog
   :: forall m v.
      ( RaftDeleteLog m v, Exception (RaftDeleteLogError m)
      , RaftWriteLog m v, Exception (RaftWriteLogError m)
+     , Typeable m
      )
   => Entries v
   -> m (Either (RaftLogError m) ())

@@ -58,6 +58,7 @@ module Raft
   , RaftLogError(..)
   , RaftLogExceptions(..)
   , RaftReadLogErr(..)
+  , RaftWriteLogErr(..)
 
   -- * Logging
   , LogCtx(..)
@@ -188,7 +189,7 @@ logAndPanic msg = flip logAndPanicIO msg =<< asks raftNodeLogCtx
 -- It should run forever
 runRaftNode
   :: ( Show v, Show sm, Serialize v, Show (Action sm v), Show (RaftLogError m)
-     , MonadIO m, MonadConc m, MonadFail m
+     , Typeable m, MonadIO m, MonadConc m, MonadFail m
      , RSM sm v m
      , Show (RSMPError sm v)
      , RaftSendRPC m v
@@ -229,7 +230,7 @@ runRaftNode nodeConfig@NodeConfig{..} logCtx timerSeed initRSM = do
 handleEventLoop
   :: forall sm v m.
      ( Show v, Serialize v, Show sm, Show (Action sm v), Show (RaftLogError m)
-     , MonadIO m, MonadConc m, MonadFail m
+     , Typeable m, MonadIO m, MonadConc m, MonadFail m
      , RSM sm v m
      , Show (RSMPError sm v)
      , RaftPersist m
@@ -309,7 +310,7 @@ handleEventLoop initRSM = do
 
 handleActions
   :: ( Show v, Show sm, Show (Action sm v), Show (RaftLogError m)
-     , MonadIO m, MonadConc m
+     , Typeable m, MonadIO m, MonadConc m
      , RSM sm v m
      , RaftSendRPC m v
      , RaftSendClient m sm
@@ -324,7 +325,7 @@ handleActions = mapM_ . handleAction
 handleAction
   :: forall sm v m.
      ( Show v, Show sm, Show (Action sm v), Show (RaftLogError m)
-     , MonadIO m, MonadConc m
+     , Typeable m, MonadIO m, MonadConc m
      , RSM sm v m
      , RaftSendRPC m v
      , RaftSendClient m sm
@@ -355,7 +356,7 @@ handleAction nodeConfig action = do
     AppendLogEntries entries -> do
       eRes <- lift (updateLog entries)
       case eRes of
-        Left err -> panic (show err)
+        Left err -> logAndPanic (show err)
         Right _ -> do
           -- Update the last log entry data
           modify $ \(RaftNodeState ns) ->

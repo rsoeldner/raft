@@ -121,7 +121,10 @@ instance RaftRecvRPC (RaftExampleM Store StoreCmd) StoreCmd where
 
 instance RaftWriteLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftWriteLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  writeLogEntries entries = RaftExampleM $ lift $ RaftSocketT (lift $ writeLogEntries entries)
+  writeLogEntries entries
+    = writeLogEntries entries :: RaftExampleM Store StoreCmd
+                                  (Either
+                                    (RaftWriteLogErr (RaftExampleM Store StoreCmd)) ())
 
 instance RaftPersist (RaftExampleM Store StoreCmd) where
   type RaftPersistError (RaftExampleM Store StoreCmd) = NodeEnvError
