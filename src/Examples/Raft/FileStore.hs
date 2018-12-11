@@ -55,7 +55,7 @@ instance (MonadIO m, MonadConc m, S.Serialize v) => RaftWriteLog (RaftFileStoreT
     entriesPath <- asks nfsLogEntries
     eLogEntries <- readLogEntries
     case eLogEntries of
-      Left err -> panic ("writeLogEntries: " <> err)
+      Left msg -> pure $ Left $ RaftWriteLogErrorInternal msg
       Right currEntries -> liftIO $ Right <$> BS.writeFile entriesPath (S.encode (currEntries >< newEntries))
 
 instance (MonadIO m, MonadConc m) => RaftPersist (RaftFileStoreT m) where
@@ -95,7 +95,7 @@ instance (MonadIO m, MonadConc m, S.Serialize v) => RaftDeleteLog (RaftFileStore
   deleteLogEntriesFrom idx = do
     eLogEntries <- readLogEntries
     case eLogEntries of
-      Left err -> panic ("deleteLogEntriesFrom: " <> err)
+      Left msg -> pure $ Left $ RaftDeleteLogErrorInternal msg
       Right (entries :: Entries v) -> do
         let newLogEntries = Seq.dropWhileR ((>= idx) . entryIndex) entries
         entriesPath <- asks nfsLogEntries
