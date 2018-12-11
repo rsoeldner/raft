@@ -93,6 +93,8 @@ data NodeEnv sm = NodeEnv
 newtype RaftExampleM sm v a = RaftExampleM { unRaftExampleM :: ReaderT (NodeEnv sm) (RaftSocketT v (RaftFileStoreT IO)) a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadReader (NodeEnv sm), Alternative, MonadPlus)
 
+instance Exception (RaftReadLogErr (RaftExampleM Store StoreCmd))
+
 deriving instance MonadThrow (RaftExampleM sm v)
 deriving instance MonadCatch (RaftExampleM sm v)
 deriving instance MonadMask (RaftExampleM sm v)
@@ -130,8 +132,14 @@ instance RaftPersist (RaftExampleM Store StoreCmd) where
 
 instance RaftReadLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftReadLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  readLogEntry idx = RaftExampleM $ lift $ RaftSocketT (lift $ readLogEntry idx)
-  readLastLogEntry = RaftExampleM $ lift $ RaftSocketT (lift readLastLogEntry)
+  readLogEntry idx = readLogEntry idx :: RaftExampleM Store StoreCmd
+                                           (Either
+                                             (RaftReadLogErr (RaftExampleM Store StoreCmd))
+                                             (Maybe (Entry StoreCmd)))
+  readLastLogEntry = readLastLogEntry :: RaftExampleM Store StoreCmd
+                                           (Either
+                                             (RaftReadLogErr (RaftExampleM Store StoreCmd))
+                                             (Maybe (Entry StoreCmd)))
 
 instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftDeleteLogError (RaftExampleM Store StoreCmd) = NodeEnvError

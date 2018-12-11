@@ -40,6 +40,8 @@ data NodeFileStoreEnv = NodeFileStoreEnv
 newtype RaftFileStoreT m a = RaftFileStoreT { unRaftFileStoreT :: ReaderT NodeFileStoreEnv m a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadReader NodeFileStoreEnv, Alternative, MonadPlus, MonadTrans)
 
+instance Exception (RaftReadLogErr (RaftFileStoreT IO))
+
 deriving instance MonadConc m => MonadThrow (RaftFileStoreT m)
 deriving instance MonadConc m => MonadCatch (RaftFileStoreT m)
 deriving instance MonadConc m => MonadMask (RaftFileStoreT m)
@@ -76,7 +78,7 @@ instance (MonadIO m, MonadConc m, S.Serialize v) => RaftReadLog (RaftFileStoreT 
   readLogEntry (Index idx) = do
     eLogEntries <- readLogEntries
     case eLogEntries of
-      Left err -> panic ("readLogEntry: " <> err)
+      Left msg -> pure $ Left $ RaftReadLogErrorInternal msg
       Right entries ->
         case entries Seq.!? fromIntegral (if idx == 0 then 0 else idx - 1) of
           Nothing -> pure (Right Nothing)

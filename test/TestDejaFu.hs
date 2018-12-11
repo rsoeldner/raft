@@ -8,6 +8,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TestDejaFu where
 
@@ -93,6 +94,8 @@ deriving instance MonadThrow RaftTestM
 deriving instance MonadCatch RaftTestM
 deriving instance MonadMask RaftTestM
 deriving instance MonadConc RaftTestM
+
+instance Exception (RaftReadLogErr RaftTestM)
 
 runRaftTestM :: TestNodeEnv -> TestNodeStates -> RaftTestM a -> ConcIO a
 runRaftTestM testEnv testState =
@@ -186,7 +189,7 @@ instance RaftReadLog RaftTestM StoreCmd where
           Nothing -> pure (Right Nothing)
           Just e
             | entryIndex e == Index idx -> pure (Right $ Just e)
-            | otherwise -> pure $ Left (RaftTestError "Malformed log")
+            | otherwise -> pure $ Left $ RaftReadLogError (RaftTestError "Malformed log")
   readLastLogEntry = do
     log <- fmap testNodeLog . getNodeState =<< askSelfNodeId
     case log of

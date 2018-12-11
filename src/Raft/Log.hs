@@ -9,6 +9,7 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GADTs #-}
 
 module Raft.Log where
@@ -108,6 +109,13 @@ class (Show (RaftWriteLogError m), Monad m) => RaftWriteLog m v where
 
 data DeleteSuccess v = DeleteSuccess
 
+data RaftReadLogErr m
+  = RaftReadLogError (RaftReadLogError m)
+  | RaftReadLogErrorInternal Text
+
+deriving instance Show (RaftReadLogError m) => Show (RaftReadLogErr m)
+
+
 -- | Provides an interface for nodes to delete log entries from storage.
 class (Show (RaftDeleteLogError m), Monad m) => RaftDeleteLog m v where
   type RaftDeleteLogError m
@@ -118,26 +126,26 @@ class (Show (RaftDeleteLogError m), Monad m) => RaftDeleteLog m v where
     => Index -> m (Either (RaftDeleteLogError m) (DeleteSuccess v))
 
 -- | Provides an interface for nodes to read log entries from storage.
-class (Show (RaftReadLogError m), Monad m) => RaftReadLog m v where
+class (Show (RaftReadLogErr m), Monad m) => RaftReadLog m v where
   type RaftReadLogError m
   -- | Read the log at a given index
   readLogEntry
-    :: Exception (RaftReadLogError m)
-    => Index -> m (Either (RaftReadLogError m) (Maybe (Entry v)))
+    :: Exception (RaftReadLogErr m)
+    => Index -> m (Either (RaftReadLogErr m) (Maybe (Entry v)))
   -- | Read log entries from a specific index onwards, including the specific
   -- index
   readLogEntriesFrom
-    :: Exception (RaftReadLogError m)
-    => Index -> m (Either (RaftReadLogError m) (Entries v))
+    :: Exception (RaftReadLogErr m)
+    => Index -> m (Either (RaftReadLogErr m) (Entries v))
   -- | Read the last log entry in the log
   readLastLogEntry
-    :: Exception (RaftReadLogError m)
-    => m (Either (RaftReadLogError m) (Maybe (Entry v)))
+    :: Exception (RaftReadLogErr m)
+    => m (Either (RaftReadLogErr m) (Maybe (Entry v)))
 
   default readLogEntriesFrom
-    :: Exception (RaftReadLogError m)
+    :: Exception (RaftReadLogErr m)
     => Index
-    -> m (Either (RaftReadLogError m) (Entries v))
+    -> m (Either (RaftReadLogErr m) (Entries v))
   readLogEntriesFrom idx = do
       eLastLogEntry <- readLastLogEntry
       case eLastLogEntry of
@@ -153,16 +161,16 @@ class (Show (RaftReadLogError m), Monad m) => RaftReadLog m v where
             eLogEntry <- readLogEntry idx'
             case eLogEntry of
               Left err -> pure (Left err)
-              Right Nothing -> panic "Malformed log"
+              Right Nothing -> pure (Left (RaftReadLogErrorInternal "Malformed log"))
               Right (Just logEntry) -> fmap (|> logEntry) <$>  go (decrIndexWithDefault0 idx')
 
 type RaftLog m v = (RaftReadLog m v, RaftWriteLog m v, RaftDeleteLog m v)
-type RaftLogExceptions m = (Exception (RaftReadLogError m), Exception (RaftWriteLogError m), Exception (RaftDeleteLogError m))
+type RaftLogExceptions m = (Exception (RaftReadLogErr m), Exception (RaftWriteLogError m), Exception (RaftDeleteLogError m))
 
 -- | Representation of possible errors that come from reading, writing or
 -- deleting logs from the persistent storage
 data RaftLogError m where
-  RaftLogReadError :: Show (RaftReadLogError m) => RaftReadLogError m -> RaftLogError m
+  RaftLogReadError :: Show (RaftReadLogErr m) => RaftReadLogErr m -> RaftLogError m
   RaftLogWriteError :: Show (RaftWriteLogError m) => RaftWriteLogError m -> RaftLogError m
   RaftLogDeleteError :: Show (RaftDeleteLogError m) => RaftDeleteLogError m -> RaftLogError m
 

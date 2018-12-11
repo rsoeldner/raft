@@ -57,6 +57,7 @@ module Raft
   , RaftLog
   , RaftLogError(..)
   , RaftLogExceptions(..)
+  , RaftReadLogErr(..)
 
   -- * Logging
   , LogCtx(..)
@@ -125,7 +126,7 @@ import Raft.Config
 import Raft.Event
 import Raft.Handle
 import Raft.Log
-import Raft.Logging hiding (logInfo, logDebug, logCritical)
+import Raft.Logging hiding (logInfo, logDebug, logCritical, logAndPanic)
 import Raft.Monad hiding (logInfo, logDebug)
 import Raft.NodeState
 import Raft.Persistent
@@ -177,6 +178,9 @@ logDebug msg = flip logDebugIO msg =<< asks raftNodeLogCtx
 
 logCritical :: MonadIO m => Text -> RaftT v m ()
 logCritical msg = flip logCriticalIO msg =<< asks raftNodeLogCtx
+
+logAndPanic :: MonadIO m => Text -> RaftT v m a
+logAndPanic msg = flip logAndPanicIO msg =<< asks raftNodeLogCtx
 
 ------------------------------------------------------------------------------
 
@@ -369,7 +373,7 @@ handleAction nodeConfig action = do
                 FromIndex idx -> do
                   eLogEntries <- lift (readLogEntriesFrom (decrIndexWithDefault0 idx))
                   case eLogEntries of
-                    Left err -> throw err
+                    Left err -> logAndPanic $ show err
                     Right log ->
                       case log of
                         pe :<| entries@(e :<| _)
@@ -423,7 +427,7 @@ applyLogEntries
      ( Show sm
      , MonadConc m
      , RaftReadLog m v
-     , Exception (RaftReadLogError m)
+     , Exception (RaftReadLogErr m)
      , RSM sm v m
      , Show (RSMPError sm v)
      )

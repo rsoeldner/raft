@@ -165,6 +165,8 @@ instance Exception NodeEnvError
 
 type RTLog v = ReaderT NodeId (StateT (TestState v) IO)
 
+instance Exception (RaftReadLogErr (RTLog StoreCmd))
+
 instance RaftWriteLog (RTLog v) StoreCmd where
   type RaftWriteLogError (RTLog v) = NodeEnvError
   writeLogEntries newEntries = do
@@ -212,7 +214,9 @@ testHandleActions :: NodeId -> [Action Store StoreCmd] -> Scenario StoreCmd ()
 testHandleActions sender =
   mapM_ (testHandleAction sender)
 
-testHandleAction :: NodeId -> Action Store StoreCmd -> Scenario StoreCmd ()
+testHandleAction
+  :: (Exception (RaftReadLogErr (RTLog StoreCmd)))
+  => NodeId -> Action Store StoreCmd -> Scenario StoreCmd ()
 testHandleAction sender action = do
   case action of
     SendRPC nId rpcAction -> do
@@ -240,7 +244,8 @@ testHandleAction sender action = do
       noop = pure ()
 
       mkRPCfromSendRPCAction
-        :: NodeId -> SendRPCAction StoreCmd -> Scenario v (RPCMessage StoreCmd)
+        :: (Exception (RaftReadLogErr (RTLog v)))
+        => NodeId -> SendRPCAction StoreCmd -> Scenario v (RPCMessage StoreCmd)
       mkRPCfromSendRPCAction nId sendRPCAction = do
         sc <- get
         (nodeConfig, _, raftState@(RaftNodeState ns), _) <- getNodeInfo nId
@@ -311,7 +316,8 @@ testHandleEvent nodeId event = do
   applyLogEntries nodeId sm
   where
     applyLogEntries
-      :: NodeId
+      :: (Exception (RaftReadLogErr (RTLog v)))
+      => NodeId
       -> Store
       -> Scenario v ()
     applyLogEntries nId stateMachine  = do
@@ -356,7 +362,9 @@ testHandleEvent nodeId event = do
 
     -- In the case that a node is a follower receiving an AppendEntriesRPC
     -- Event, read the log at the aePrevLogIndex
-    loadLogEntryTermAtAePrevLogIndex :: RaftNodeState v -> Scenario v (RaftNodeState v)
+    loadLogEntryTermAtAePrevLogIndex
+      :: (Exception (RaftReadLogErr (RTLog v)))
+      => RaftNodeState v -> Scenario v (RaftNodeState v)
     loadLogEntryTermAtAePrevLogIndex (RaftNodeState rns) =
       case event of
         MessageEvent (RPCMessageEvent (RPCMessage _ (AppendEntriesRPC ae))) -> do
