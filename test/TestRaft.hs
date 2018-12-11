@@ -165,8 +165,6 @@ instance Exception NodeEnvError
 
 type RTLog v = ReaderT NodeId (StateT (TestState v) IO)
 
-instance Exception (RaftReadLogErr (RTLog StoreCmd))
-
 instance RaftWriteLog (RTLog v) StoreCmd where
   type RaftWriteLogError (RTLog v) = NodeEnvError
   writeLogEntries newEntries = do
@@ -215,8 +213,7 @@ testHandleActions sender =
   mapM_ (testHandleAction sender)
 
 testHandleAction
-  :: (Exception (RaftReadLogErr (RTLog StoreCmd)))
-  => NodeId -> Action Store StoreCmd -> Scenario StoreCmd ()
+  :: NodeId -> Action Store StoreCmd -> Scenario StoreCmd ()
 testHandleAction sender action = do
   case action of
     SendRPC nId rpcAction -> do
@@ -243,9 +240,7 @@ testHandleAction sender action = do
     where
       noop = pure ()
 
-      mkRPCfromSendRPCAction
-        :: (Exception (RaftReadLogErr (RTLog v)))
-        => NodeId -> SendRPCAction StoreCmd -> Scenario v (RPCMessage StoreCmd)
+      mkRPCfromSendRPCAction :: Typeable v => NodeId -> SendRPCAction StoreCmd -> Scenario v (RPCMessage StoreCmd)
       mkRPCfromSendRPCAction nId sendRPCAction = do
         sc <- get
         (nodeConfig, _, raftState@(RaftNodeState ns), _) <- getNodeInfo nId

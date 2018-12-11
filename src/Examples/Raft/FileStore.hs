@@ -40,8 +40,6 @@ data NodeFileStoreEnv = NodeFileStoreEnv
 newtype RaftFileStoreT m a = RaftFileStoreT { unRaftFileStoreT :: ReaderT NodeFileStoreEnv m a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadReader NodeFileStoreEnv, Alternative, MonadPlus, MonadTrans)
 
-instance Exception (RaftReadLogErr (RaftFileStoreT IO))
-
 deriving instance MonadConc m => MonadThrow (RaftFileStoreT m)
 deriving instance MonadConc m => MonadCatch (RaftFileStoreT m)
 deriving instance MonadConc m => MonadMask (RaftFileStoreT m)

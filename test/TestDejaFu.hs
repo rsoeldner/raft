@@ -95,8 +95,6 @@ deriving instance MonadCatch RaftTestM
 deriving instance MonadMask RaftTestM
 deriving instance MonadConc RaftTestM
 
-instance Exception (RaftReadLogErr RaftTestM)
-
 runRaftTestM :: TestNodeEnv -> TestNodeStates -> RaftTestM a -> ConcIO a
 runRaftTestM testEnv testState =
   flip evalStateT testState . flip runReaderT testEnv . unRaftTestM

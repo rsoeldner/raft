@@ -114,6 +114,7 @@ data RaftReadLogErr m
   | RaftReadLogErrorInternal Text
 
 deriving instance Show (RaftReadLogError m) => Show (RaftReadLogErr m)
+deriving instance (Typeable m, Exception (RaftReadLogError m)) => Exception (RaftReadLogErr m)
 
 
 -- | Provides an interface for nodes to delete log entries from storage.

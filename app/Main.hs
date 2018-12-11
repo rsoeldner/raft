@@ -93,8 +93,6 @@ data NodeEnv sm = NodeEnv
 newtype RaftExampleM sm v a = RaftExampleM { unRaftExampleM :: ReaderT (NodeEnv sm) (RaftSocketT v (RaftFileStoreT IO)) a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadReader (NodeEnv sm), Alternative, MonadPlus)
 
-instance Exception (RaftReadLogErr (RaftExampleM Store StoreCmd))
-
 deriving instance MonadThrow (RaftExampleM sm v)
 deriving instance MonadCatch (RaftExampleM sm v)
 deriving instance MonadMask (RaftExampleM sm v)
