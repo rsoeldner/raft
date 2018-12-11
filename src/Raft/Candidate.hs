@@ -122,6 +122,7 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
        , lsLastLogEntry = csLastLogEntry
        , lsReadReqsHandled = 0
        , lsReadRequest = mempty
+       , lsClientReqCache = mempty
        }
 
 handleTimeout :: TimeoutHandler 'Candidate sm v

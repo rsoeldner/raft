@@ -25,7 +25,6 @@ import Control.Monad.Fail
 import Control.Monad.Catch
 import Control.Monad.Trans.Class
 
-import qualified Data.Map as Map
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as NS
 import Network.Simple.TCP
