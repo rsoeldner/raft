@@ -531,7 +531,7 @@ unit_client_write_response = runScenario $ do
   testClientReadRequest node0
   testClientWriteRequest testSetCmd node0
   cResps <- gets testClientResps
-  let ClientWriteResponse (ClientWriteResp idx) = lookupLastClientResp client0 cResps
+  let ClientWriteResponse (ClientWriteResp idx _) = lookupLastClientResp client0 cResps
   liftIO $ HUnit.assertBool "A client should receive an aknowledgement of a writing request"
     (idx == Index 2)
 

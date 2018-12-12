@@ -75,9 +75,8 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
                case entryIssuer of
                  Nothing -> panic "No last log entry issuer"
                  Just (LeaderIssuer _) -> pure lsUpdatedCommitIdx
-                 Just (ClientIssuer cid) -> do
-                   logDebug "WTF GOING ON BRO"
-                   respondClientWrite cid entryIdx
+                 Just (ClientIssuer cid sn) -> do
+                   respondClientWrite cid entryIdx sn
                    let clientReqCache = lsClientReqCache lsUpdatedCommitIdx
                        updateReqData = second (const (Just entryIdx))
                        newClientReqCache = Map.adjust updateReqData cid clientReqCache
@@ -143,14 +142,14 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
       ClientWriteReq newSerial v ->
         leaderResultState HandleClientReq <$> handleClientWriteReq newSerial v
   where
-    mkNewLogEntry v = do
+    mkNewLogEntry v sn = do
       currentTerm <- currentTerm <$> get
       let lastLogEntryIdx = lastLogEntryIndex lsLastLogEntry
       pure $ Entry
         { entryIndex = succ lastLogEntryIdx
         , entryTerm = currentTerm
         , entryValue = EntryValue v
-        , entryIssuer = ClientIssuer cid
+        , entryIssuer = ClientIssuer cid sn
         , entryPrevHash = hashLastLogEntry lsLastLogEntry
         }
 
@@ -169,7 +168,7 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
           | currSerial == newSerial -> do
               case mResp of
                 Nothing -> logDebug $ "Serial " <> show currSerial <> " already exists. Ignoring repeat request."
-                Just idx -> respondClientWrite cid idx
+                Just idx -> respondClientWrite cid idx newSerial
               pure ls
           -- This is important case #2
           | succ currSerial == newSerial -> do
@@ -185,7 +184,7 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
               pure ls
       where
         handleNewEntry = do
-          newLogEntry <- mkNewLogEntry v
+          newLogEntry <- mkNewLogEntry v newSerial
           appendLogEntries (Empty Seq.|> newLogEntry)
           aeData <- mkAppendEntriesData ls (FromClientWriteReq newLogEntry)
           broadcast (SendAppendEntriesRPC aeData)

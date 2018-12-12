@@ -21,10 +21,11 @@ import qualified Data.ByteString as BS
 import Data.Serialize
 import Data.Sequence (Seq(..), (|>), foldlWithIndex)
 
+import Raft.Client
 import Raft.Types
 
 data EntryIssuer
-  = ClientIssuer ClientId
+  = ClientIssuer ClientId SerialNum
   | LeaderIssuer LeaderId
   deriving (Show, Generic, Serialize)
 

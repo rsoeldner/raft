@@ -146,9 +146,9 @@ respondClientRead clientId = do
   clientReadResp <- ClientReadResponse . ClientReadResp <$> asks stateMachine
   tellAction (RespondToClient clientId clientReadResp)
 
-respondClientWrite :: ClientId -> Index -> TransitionM sm v ()
-respondClientWrite cid entryIdx =
-  tellActions [RespondToClient cid (ClientWriteResponse (ClientWriteResp entryIdx))]
+respondClientWrite :: ClientId -> Index -> SerialNum -> TransitionM sm v ()
+respondClientWrite cid entryIdx sn =
+  tellActions [RespondToClient cid (ClientWriteResponse (ClientWriteResp entryIdx sn))]
 
 appendLogEntries :: Show v => Seq (Entry v) -> TransitionM sm v ()
 appendLogEntries = tellAction . AppendLogEntries
