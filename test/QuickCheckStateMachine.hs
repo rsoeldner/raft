@@ -49,6 +49,9 @@ import           Test.StateMachine.Types       (Command (..), Commands (..),
 import qualified Test.StateMachine.Types.Rank2 as Rank2
 import           Text.Read                     (readEither)
 
+import qualified Data.Functor.Classes
+import           Debug.Trace                   (trace)
+
 ------------------------------------------------------------------------
 
 type Port = Int
@@ -89,7 +92,7 @@ deriving instance ToExpr (Model Concrete)
 initModel :: Model r
 initModel = Model [] False Nothing []
 
-transition :: Model r -> Action r -> Response r -> Model r
+transition :: Data.Functor.Classes.Show1 r => Model r -> Action r -> Response r -> Model r
 transition Model {..} act resp = case (act, resp) of
   (SpawnNode port _, SpawnedNode ph) ->
     let newNodes = nodes ++ [(port, ph)]
@@ -106,7 +109,7 @@ transition Model {..} act resp = case (act, resp) of
   (Read, Timeout)                  -> Model {..}
   (Set {}, Timeout)                -> Model {..}
   (Incr {}, Timeout)               -> Model {..}
-  (_, _)                           -> error "transition"
+  unaccounted                      -> trace (show unaccounted) $ error "transition"
 
 precondition :: Model Symbolic -> Action Symbolic -> Logic
 precondition Model {..} act = case act of

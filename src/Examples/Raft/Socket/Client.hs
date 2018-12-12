@@ -2,15 +2,18 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Examples.Raft.Socket.Client where
 
 import Protolude
 
 import qualified Control.Monad.Catch
+import           Control.Monad.Trans.Class
 
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as N
@@ -27,41 +30,56 @@ import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
 
 
 data ClientSocketEnv
-  = ClientSocketEnv { clientPort :: N.ServiceName
-                    , clientHost :: N.HostName
+  = ClientSocketEnv { clientId :: ClientId
                     , clientSocket :: N.Socket
                     } deriving (Show)
 
+newtype RaftSocketClientT v m a
+  = RaftSocketClientT { unRaftSocketClientM :: RaftClientT v (ReaderT ClientSocketEnv m) a }
+  deriving newtype ( Functor, Applicative, Monad, MonadIO)
 
+instance MonadReader ClientSocketEnv (RaftSocketClientM v) where
+  ask = ask
 
-newtype RaftSocketClientM a
-  = RaftSocketClientM { unRaftSocketClientM :: StateT SerialNum (ReaderT ClientSocketEnv IO) a }
-  deriving newtype ( Functor, Applicative, Monad, MonadIO
-                   , MonadReader ClientSocketEnv, MonadState SerialNum
-                   , Alternative, MonadPlus)
+instance MonadTrans (RaftSocketClientT v) where
+  lift = RaftSocketClientT . lift . lift
+
+type RaftSocketClientM v = RaftSocketClientT v IO
+
+-- deriving instance Alternative (RaftSocketClientM v)
+-- deriving instance MonadPlus (RaftSocketClientM v)
 
 -- This annoying instance is because of the Haskeline library, letting us use a
 -- custom monad transformer stack as the base monad of 'InputT'. IMO it should
 -- be automatically derivable. Why does haskeline use a custom exception
 -- monad... ?
-instance MonadException RaftSocketClientM where
-  controlIO f =
-    RaftSocketClientM $ StateT $ \s ->
-      controlIO $ \(RunIO run) ->
-        let run' = RunIO (fmap (RaftSocketClientM . StateT . const) . run . flip runStateT s . unRaftSocketClientM)
-         in fmap (flip runStateT s . unRaftSocketClientM) $ f run'
+-- instance MonadException m => MonadException (RaftSocketClientT v m) where
+--   controlIO f =
+--     RaftSocketClientT $ ReaderT $ \r ->
+--       controlIO $ \(RunIO run) ->
+--         let run' = RunIO (fmap (RaftSocketClientT . ReaderT . const) . run . flip runReaderT r . unRaftSocketClientM)
+--          in fmap (flip runReaderT r . unRaftSocketClientM) $ f run'
 
-nextSerialNum :: RaftSocketClientM SerialNum
-nextSerialNum = do
-  currSerial <- get
-  modify succ
-  pure currSerial
+instance S.Serialize v => RaftClientSend (RaftSocketClientM v) v where
+  type RaftClientSendError (RaftSocketClientM v) v = Text
+  raftClientSend nid creq = do
+    let (host,port) = nidToHostPort nid
+    eRes <-
+      liftIO $ Control.Monad.Catch.try $
+        N.connect host port $ \(sock, sockAddr) ->
+          N.send sock (S.encode creq)
+    case eRes of
+      Left (err :: SomeException) ->
+        pure $ Left ("Failed to send ClientWriteReq: " <> show err)
+      Right _ -> pure (Right ())
+
+
 
 --------------------------------------------------------------------------------
 
-runRaftSocketClientM :: ClientSocketEnv -> RaftSocketClientM a -> IO a
+runRaftSocketClientM :: ClientSocketEnv -> RaftSocketClientM v a -> IO a
 runRaftSocketClientM socketEnv =
-  flip runReaderT socketEnv . flip evalStateT 0 . unRaftSocketClientM
+  flip runReaderT socketEnv . runRaftClientT (clientId socketEnv) 0 . unRaftSocketClientM
 
 -- | Randomly select a node from a set of nodes a send a message to it
 selectRndNode :: NodeIds -> IO NodeId
@@ -69,21 +87,20 @@ selectRndNode nids =
   (Set.toList nids L.!!) <$> randomRIO (0, length nids - 1)
 
 -- | Randomly read the state of a random node
-sendReadRndNode :: (S.Serialize sm, S.Serialize v) => Proxy v -> NodeIds -> RaftSocketClientM (Either [Char] (ClientResponse sm))
+sendReadRndNode :: (S.Serialize sm, S.Serialize v) => Proxy v -> NodeIds -> RaftSocketClientM v (Either [Char] (ClientResponse sm))
 sendReadRndNode proxyV nids =
   liftIO (selectRndNode nids) >>= sendRead proxyV
 
 -- | Randomly write to a random node
-sendWriteRndNode :: (S.Serialize v, S.Serialize sm) => v -> NodeIds -> RaftSocketClientM (Either [Char] (ClientResponse sm))
+sendWriteRndNode :: (S.Serialize v, S.Serialize sm) => v -> NodeIds -> RaftSocketClientM v (Either [Char] (ClientResponse sm))
 sendWriteRndNode cmd nids =
   liftIO (selectRndNode nids) >>= sendWrite cmd
 
 -- | Request the state of a node. It blocks until the node responds
-sendRead :: forall v sm. (S.Serialize sm, S.Serialize v) => Proxy v -> NodeId -> RaftSocketClientM (Either [Char] (ClientResponse sm))
+sendRead :: forall v sm. (S.Serialize sm, S.Serialize v) => Proxy v -> NodeId -> RaftSocketClientM v (Either [Char] (ClientResponse sm))
 sendRead _  nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
-      clientId = ClientId (hostPortToNid (clientHost, clientPort))
   eRes <-
     liftIO $ Control.Monad.Catch.try $
       N.connect host port $ \(sock, sockAddr) -> N.send sock . S.encode $
@@ -93,22 +110,17 @@ sendRead _  nid = do
     Right _ -> acceptClientConnections
 
 -- | Write to a node. It blocks until the node responds
-sendWrite :: (S.Serialize v, S.Serialize sm) => v -> NodeId -> RaftSocketClientM (Either [Char] (ClientResponse sm))
+sendWrite :: (S.Serialize v, S.Serialize sm) => v -> NodeId -> RaftSocketClientM v (Either [Char] (ClientResponse sm))
 sendWrite cmd nid = do
   socketEnv@ClientSocketEnv{..} <- ask
   let (host, port) = nidToHostPort nid
-      clientId = ClientId (hostPortToNid (clientHost, clientPort))
-  serial <- nextSerialNum
-  eRes <-
-    liftIO $ Control.Monad.Catch.try $
-      N.connect host port $ \(sock, sockAddr) -> N.send sock . S.encode $
-        ClientRequestEvent (ClientRequest clientId (ClientWriteReq serial cmd))
+  eRes <- RaftSocketClientT $ clientSendWrite nid cmd
   case eRes of
-    Left (err :: SomeException) -> pure $ Left ("Failed to send ClientWriteReq: " <> show err)
+    Left err -> pure $ Left err
     Right _ -> acceptClientConnections
 
 -- | Accept a connection and return the client response synchronously
-acceptClientConnections :: S.Serialize sm => RaftSocketClientM (Either [Char] (ClientResponse sm))
+acceptClientConnections :: S.Serialize sm => RaftSocketClientM v (Either [Char] (ClientResponse sm))
 acceptClientConnections = do
   socketEnv@ClientSocketEnv{..} <- ask
   liftIO $ fmap (join . first (show :: SomeException -> [Char])) $ Control.Monad.Catch.try $

@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 
 module Raft.Client where
 
@@ -16,6 +17,8 @@ import Control.Monad.Trans.Class
 
 import qualified Data.Serialize as S
 import Numeric.Natural (Natural)
+
+import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
 
 import Raft.Types
 
@@ -94,45 +97,101 @@ instance S.Serialize ClientRedirResp
 {- This is the interface with which clients interact with Raft nodes -}
 
 class Monad m => RaftClientSend m v where
-  raftClientSend :: NodeId -> ClientRequest v -> m ()
+  type RaftClientSendError m v
+  raftClientSend :: NodeId -> ClientRequest v -> m (Either (RaftClientSendError m v) ())
 
 class Monad m => RaftClientRecv m s where
-  raftClientRecv :: m (ClientResponse s)
+  type RaftClientRecvError m s
+  raftClientRecv :: m (Either (RaftClientRecvError m s) (ClientResponse s))
 
 newtype RaftClientT v m a = RaftClientT
   { unRaftClientT :: ReaderT ClientId (StateT SerialNum m) a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadState SerialNum, MonadReader ClientId, MonadFail)
+  } deriving (Functor, Applicative, Monad, MonadIO, MonadState SerialNum, MonadReader ClientId, MonadFail, Alternative, MonadPlus)
 
 instance MonadTrans (RaftClientT v) where
   lift = RaftClientT . lift . lift
+
+-- This annoying instance is because of the Haskeline library, letting us use a
+-- custom monad transformer stack as the base monad of 'InputT'. IMO it should
+-- be automatically derivable. Why does haskeline use a custom exception
+-- monad... ?
+instance MonadException m => MonadException (RaftClientT v m) where
+  controlIO f =
+    RaftClientT $ ReaderT $ \r -> StateT $ \s ->
+      controlIO $ \(RunIO run) ->
+        let run' = RunIO (fmap (RaftClientT . ReaderT . const . StateT . const) . run . flip runStateT s . flip runReaderT r . unRaftClientT)
+         in fmap (flip runStateT s . flip runReaderT r . unRaftClientT) $ f run'
 
 runRaftClientT :: Monad m => ClientId -> SerialNum -> RaftClientT v m a -> m a
 runRaftClientT cid sn = flip evalStateT sn . flip runReaderT cid . unRaftClientT
 
 clientSendRead
   :: forall m v. RaftClientSend m v
-  => NodeId -> RaftClientT v m ()
+  => NodeId -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendRead nid =
   ask >>= \cid -> lift $
     raftClientSend @m @v nid (ClientRequest cid ClientReadReq)
 
 clientSendWrite
   :: RaftClientSend m v
-  => NodeId -> v -> RaftClientT v m ()
+  => NodeId -> v -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendWrite nid v = do
   ask >>= \cid -> get >>= \sn -> lift $
     raftClientSend nid (ClientRequest cid (ClientWriteReq sn v))
 
 clientRecv
   :: RaftClientRecv m s
-  => RaftClientT v m (ClientResponse s)
+  => RaftClientT v m (Either (RaftClientRecvError m s) (ClientResponse s))
 clientRecv = do
-  cresp <- lift raftClientRecv
-  case cresp of
-    ClientWriteResponse (ClientWriteResp _ (SerialNum n)) -> do
-      SerialNum m <- get
-      if m == n
-        then put (SerialNum (succ m))
-        else panic "Received invalid serial number response"
-    otherwise -> pure ()
-  pure cresp
+  ecresp <- lift raftClientRecv
+  case ecresp of
+    Left err -> pure (Left err)
+    Right cresp ->
+      case cresp of
+        ClientWriteResponse (ClientWriteResp _ (SerialNum n)) -> do
+          SerialNum m <- get
+          if m == n
+            then do
+              put (SerialNum (succ m))
+              pure (Right cresp)
+            else panic "Received invalid serial number response"
+        _ -> pure (Right cresp)
+
+--------------------------------------------------------------------------------
+--
+-- class RaftClient m where
+--   askClientId :: m ClientId
+--   getSerialNum :: m SerialNum
+--   putSerialNum :: SerialNum -> m ()
+--
+-- clientSendRead'
+--   :: forall m v. (RaftClient m,  RaftClientSend m v)
+--   => NodeId -> Proxy v -> m (Either (RaftClientSendError m v) ())
+-- clientSendRead' nid _ =
+--   askClientId >>= \cid ->
+--     raftClientSend @m @v nid (ClientRequest cid ClientReadReq)
+--
+-- clientSendWrite'
+--   :: RaftClientSend m v
+--   => NodeId -> v -> RaftClientT v m (Either (RaftClientSendError m v) ())
+-- clientSendWrite' nid v = do
+--   ask >>= \cid -> get >>= \sn -> lift $
+--     raftClientSend nid (ClientRequest cid (ClientWriteReq sn v))
+--
+-- clientRecv'
+--   :: (RaftClient m, RaftClientRecv m s)
+--   => m (Either (RaftClientRecvError m s) (ClientResponse s))
+-- clientRecv' = do
+--   ecresp <- raftClientRecv
+--   case ecresp of
+--     Left err -> pure (Left err)
+--     Right cresp ->
+--       case cresp of
+--         ClientWriteResponse (ClientWriteResp _ (SerialNum n)) -> do
+--           SerialNum m <- getSerialNum
+--           if m == n
+--             then do
+--               putSerialNum (SerialNum (succ m))
+--               pure (Right cresp)
+--             else panic "Received invalid serial number response"
+--         _ -> pure (Right cresp)

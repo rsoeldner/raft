@@ -208,15 +208,18 @@ data TestClientEnv = TestClientEnv
 type RaftTestClientM' = ReaderT TestClientEnv ConcIO
 type RaftTestClientM v = RaftClientT v RaftTestClientM'
 
-instance RaftClientSend (RaftTestClientM') StoreCmd where
+instance RaftClientSend RaftTestClientM' StoreCmd where
+  type RaftClientSendError RaftTestClientM' StoreCmd = ()
   raftClientSend nid creq = do
     Just nodeEventChan <- asks (Map.lookup nid . testClientEnvNodeEventChans)
     lift $ atomically $ writeTChan nodeEventChan (MessageEvent (ClientRequestEvent creq))
+    pure (Right ())
 
 instance RaftClientRecv RaftTestClientM' Store where
+  type RaftClientRecvError RaftTestClientM' Store = ()
   raftClientRecv = do
     clientRespChan <- asks testClientEnvRespChan
-    lift $ atomically $ readTChan clientRespChan
+    fmap Right $ lift $ atomically $ readTChan clientRespChan
 
 runRaftTestClientM
   :: ClientId
@@ -421,7 +424,7 @@ comprehensive eventChans clientRespChans =
 pollForReadResponse :: NodeId -> RaftTestClientM StoreCmd Store
 pollForReadResponse nid = do
   clientSendRead nid
-  res <- clientRecv
+  Right res <- clientRecv
   case res of
     ClientReadResponse (ClientReadResp res) -> pure res
     _ -> do
@@ -431,7 +434,7 @@ pollForReadResponse nid = do
 syncClientRead :: NodeId -> RaftTestClientM StoreCmd (Either CurrentLeader Store)
 syncClientRead nid = do
   clientSendRead nid
-  res <- clientRecv
+  Right res <- clientRecv
   case res of
     ClientReadResponse (ClientReadResp store) -> pure $ Right store
     ClientRedirectResponse (ClientRedirResp ldr) -> pure $ Left ldr
@@ -443,7 +446,7 @@ syncClientWrite
   -> RaftTestClientM StoreCmd (Either CurrentLeader Index)
 syncClientWrite nid cmd = do
   clientSendWrite nid cmd
-  res <- clientRecv
+  Right res <- clientRecv
   case res :: ClientResponse Store of
     ClientWriteResponse (ClientWriteResp idx sn) -> do
       Just nodeEventChan <- lift (asks (Map.lookup nid . testClientEnvNodeEventChans))

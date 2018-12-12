@@ -330,8 +330,7 @@ main = do
             , csLeaderId = leaderIdT
             }
           initClientSocketEnv = RS.ClientSocketEnv
-            { RS.clientPort = clientPort
-            , RS.clientHost = "localhost"
+            { RS.clientId = ClientId (hostPortToNid "localhost" clientPort)
             , RS.clientSocket = clientSocket
             }
       RS.runRaftSocketClientM initClientSocketEnv . runConsoleT initConsoleState $
