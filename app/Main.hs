@@ -121,10 +121,14 @@ instance RaftRecvRPC (RaftExampleM Store StoreCmd) StoreCmd where
 
 instance RaftWriteLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftWriteLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  writeLogEntries entries
-    = writeLogEntries entries :: RaftExampleM Store StoreCmd
-                                  (Either
-                                    (RaftWriteLogErr (RaftExampleM Store StoreCmd)) ())
+  writeLogEntries entries = RaftExampleM $ lift
+    $ RaftSocketT (lift $ do
+                    e <- writeLogEntries entries
+                    pure $ case e of
+                      Left (RaftWriteLogError err) -> Left $ RaftWriteLogError err
+                      Left (RaftWriteLogErrorInternal msg) -> Left $ RaftWriteLogErrorInternal msg
+                      Right v -> Right v
+                  )
 
 instance RaftPersist (RaftExampleM Store StoreCmd) where
   type RaftPersistError (RaftExampleM Store StoreCmd) = NodeEnvError
@@ -133,22 +137,33 @@ instance RaftPersist (RaftExampleM Store StoreCmd) where
 
 instance RaftReadLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftReadLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  readLogEntry idx = readLogEntry idx :: RaftExampleM Store StoreCmd
-                                           (Either
-                                             (RaftReadLogErr (RaftExampleM Store StoreCmd))
-                                             (Maybe (Entry StoreCmd)))
-  readLastLogEntry = readLastLogEntry :: RaftExampleM Store StoreCmd
-                                           (Either
-                                             (RaftReadLogErr (RaftExampleM Store StoreCmd))
-                                             (Maybe (Entry StoreCmd)))
+  readLogEntry idx = RaftExampleM $ lift
+    $ RaftSocketT (lift $ do
+                    e <- readLogEntry idx
+                    pure $ case e of
+                      Left (RaftReadLogError err) -> Left $ RaftReadLogError err
+                      Left (RaftReadLogErrorInternal msg) -> Left $ RaftReadLogErrorInternal msg
+                      Right v -> Right v
+                  )
+  readLastLogEntry = RaftExampleM $ lift
+    $ RaftSocketT (lift $ do
+                    e <- readLastLogEntry
+                    pure $ case e of
+                      Left (RaftReadLogError err) -> Left $ RaftReadLogError err
+                      Left (RaftReadLogErrorInternal msg) -> Left $ RaftReadLogErrorInternal msg
+                      Right v -> Right v
+                  )
 
 instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
   type RaftDeleteLogError (RaftExampleM Store StoreCmd) = NodeEnvError
-  deleteLogEntriesFrom idx
-    = deleteLogEntriesFrom idx :: RaftExampleM Store StoreCmd
-				   (Either
-				     (RaftDeleteLogErr (RaftExampleM Store StoreCmd))
-				     (DeleteSuccess StoreCmd))
+  deleteLogEntriesFrom idx = RaftExampleM $ lift
+    $ RaftSocketT (lift $ do
+                    e <- deleteLogEntriesFrom idx
+                    pure $ case e of
+                      Left (RaftDeleteLogError err) -> Left $ RaftDeleteLogError err
+                      Left (RaftDeleteLogErrorInternal msg) -> Left $ RaftDeleteLogErrorInternal msg
+                      Right v -> Right v
+                  )
 
 --------------------
 -- Client console --
