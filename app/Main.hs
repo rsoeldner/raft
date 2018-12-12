@@ -156,7 +156,6 @@ instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
 
 data ConsoleState = ConsoleState
   { csNodeIds :: NodeIds -- ^ Set of node ids that the client is aware of
-  , csSocket :: Socket -- ^ Client's socket
   , csLeaderId :: TVar (STM IO) (Maybe LeaderId) -- ^ Node id of the leader in the Raft network
   }
 
@@ -212,7 +211,7 @@ handleConsoleCmd input = do
     handleClientResponseE :: [Char] -> Either [Char] (ClientResponse Store) -> TVar (STM IO) (Maybe LeaderId) -> ConsoleM ()
     handleClientResponseE input eMsgE leaderIdT =
       case eMsgE of
-        Left err -> panic $ toS err
+        Left err -> liftIO $ putText (toS err)
         Right (ClientRedirectResponse (ClientRedirResp leader)) ->
           case leader of
             NoLeader -> do

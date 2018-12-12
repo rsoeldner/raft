@@ -2,6 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
 module Examples.Raft.Socket.Client where
@@ -21,7 +23,7 @@ import Raft.Event
 import Raft.Types
 import Examples.Raft.Socket.Common
 
-import System.Console.Haskeline.MonadException (MonadException(..))
+import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
 
 
 data ClientSocketEnv
@@ -30,16 +32,24 @@ data ClientSocketEnv
                     , clientSocket :: N.Socket
                     } deriving (Show)
 
+
+
 newtype RaftSocketClientM a
   = RaftSocketClientM { unRaftSocketClientM :: StateT SerialNum (ReaderT ClientSocketEnv IO) a }
-  deriving (Functor, Applicative, Monad, MonadIO, MonadReader ClientSocketEnv, MonadState SerialNum, Alternative, MonadPlus)
+  deriving newtype ( Functor, Applicative, Monad, MonadIO
+                   , MonadReader ClientSocketEnv, MonadState SerialNum
+                   , Alternative, MonadPlus)
 
+-- This annoying instance is because of the Haskeline library, letting us use a
+-- custom monad transformer stack as the base monad of 'InputT'. IMO it should
+-- be automatically derivable. Why does haskeline use a custom exception
+-- monad... ?
 instance MonadException RaftSocketClientM where
-  controlIO f = undefined
-    -- TODO:
-    -- RaftSocketClientM $ StateT $ \s -> ReaderT $ \r ->
-    --   let run' = RunIO (fmap (RaftSocketClientM . StateT . ReaderT . const) . run . flip . flip runStateT s . unRaftSocketClientM)
-    --   in fmap (flip runStateT s . unRaftSocketClientM) $ f run'
+  controlIO f =
+    RaftSocketClientM $ StateT $ \s ->
+      controlIO $ \(RunIO run) ->
+        let run' = RunIO (fmap (RaftSocketClientM . StateT . const) . run . flip runStateT s . unRaftSocketClientM)
+         in fmap (flip runStateT s . unRaftSocketClientM) $ f run'
 
 nextSerialNum :: RaftSocketClientM SerialNum
 nextSerialNum = do
