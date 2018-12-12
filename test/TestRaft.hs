@@ -25,6 +25,7 @@ import TestUtils
 
 import Raft hiding (sendClient)
 import Raft.Logging (logMsgToText, logMsgData, logMsgNodeId, LogMsg)
+import Raft.Client (SerialNum)
 import Raft.Action
 import Raft.Handle
 import Raft.Log
@@ -82,6 +83,7 @@ data TestState v = TestState
   , testNodePersistentStates :: Map NodeId PersistentState
   , testNodeConfigs :: Map NodeId NodeConfig
   , testClientResps :: ClientResps
+  , testClientSerial :: SerialNum
   } deriving (Show)
 
 type Scenario v a = StateT (TestState v) IO a
@@ -98,6 +100,7 @@ runScenario scenario = do
                     , testNodePersistentStates = Map.fromList $ (, initPersistentState) <$> Set.toList nodeIds
                     , testNodeConfigs = Map.fromList $ zip (Set.toList nodeIds) testConfigs
                     , testClientResps = Map.fromList [(client0, mempty)]
+                    , testClientSerial = 0
                     }
 
   evalStateT scenario initTestState
@@ -414,10 +417,12 @@ testClientReadRequest nId =
           (ClientRequest client0 ClientReadReq)))
 
 testClientWriteRequest :: StoreCmd -> NodeId -> Scenario StoreCmd ()
-testClientWriteRequest cmd nId =
+testClientWriteRequest cmd nId = do
+  currSerial <- gets testClientSerial
+  modify $ \s -> s { testClientSerial = succ currSerial }
   testHandleEvent nId (MessageEvent
-        (ClientRequestEvent
-          (ClientRequest client0 (ClientWriteReq cmd))))
+     (ClientRequestEvent
+       (ClientRequest client0 (ClientWriteReq currSerial cmd))))
 
 ----------------
 -- Unit tests --

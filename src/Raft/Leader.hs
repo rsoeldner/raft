@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DataKinds #-}
@@ -22,6 +23,7 @@ import Data.Serialize (Serialize)
 import Data.Sequence (Seq(Empty))
 import qualified Data.Set as Set
 import qualified Data.Sequence as Seq
+import qualified Data.Text as T
 
 import Raft.Config (configNodeIds)
 import Raft.NodeState
@@ -56,23 +58,30 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       pure (leaderResultState Noop newLeaderState)
   | otherwise =
       case aerReadRequest appendEntriesResp of
-        Nothing -> do
+        Nothing -> leaderResultState Noop <$> do
           let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
               newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
               newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
-              newLeaderState = ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }
+              lsUpdatedIndices = ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }
           -- Increment leader commit index if now a majority of followers have
           -- replicated an entry at a given term.
-          newestLeaderState <- incrCommitIndex newLeaderState
-          when (lsCommitIndex newestLeaderState > lsCommitIndex newLeaderState) $ do
-            let lastLogEntry = lsLastLogEntry newestLeaderState
-                entryIdx = lastLogEntryIndex lastLogEntry
-                entryIssuer = lastLogEntryIssuer lastLogEntry
-            case entryIssuer of
-              Nothing -> panic "No last log entry issuer"
-              Just (LeaderIssuer _) -> pure ()
-              Just (ClientIssuer cid) -> tellActions [RespondToClient cid (ClientWriteResponse (ClientWriteResp entryIdx))]
-          pure (leaderResultState Noop newestLeaderState)
+          lsUpdatedCommitIdx <- incrCommitIndex lsUpdatedIndices
+          if (lsCommitIndex lsUpdatedCommitIdx <= lsCommitIndex lsUpdatedIndices)
+             then pure lsUpdatedCommitIdx
+             else do
+               let lastLogEntry = lsLastLogEntry lsUpdatedCommitIdx
+                   entryIdx = lastLogEntryIndex lastLogEntry
+                   entryIssuer = lastLogEntryIssuer lastLogEntry
+               case entryIssuer of
+                 Nothing -> panic "No last log entry issuer"
+                 Just (LeaderIssuer _) -> pure lsUpdatedCommitIdx
+                 Just (ClientIssuer cid) -> do
+                   logDebug "WTF GOING ON BRO"
+                   respondClientWrite cid entryIdx
+                   let clientReqCache = lsClientReqCache lsUpdatedCommitIdx
+                       updateReqData = second (const (Just entryIdx))
+                       newClientReqCache = Map.adjust updateReqData cid clientReqCache
+                   pure lsUpdatedCommitIdx { lsClientReqCache = newClientReqCache }
         Just n -> handleReadReq n ls
   where
     handleReadReq :: Int -> LeaderState v -> TransitionM sm v (ResultState 'Leader v)
@@ -130,13 +139,9 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
         let newLeaderState =
               ls { lsReadRequest = Map.insert lsReadReqsHandled (cid, 1) lsReadRequest
                  }
-        pure (leaderResultState Noop newLeaderState)
-      ClientWriteReq v -> do
-        newLogEntry <- mkNewLogEntry v
-        appendLogEntries (Empty Seq.|> newLogEntry)
-        aeData <- mkAppendEntriesData ls (FromClientWriteReq newLogEntry)
-        broadcast (SendAppendEntriesRPC aeData)
-        pure (leaderResultState Noop ls)
+        pure (leaderResultState HandleClientReq newLeaderState)
+      ClientWriteReq newSerial v ->
+        leaderResultState HandleClientReq <$> handleClientWriteReq newSerial v
   where
     mkNewLogEntry v = do
       currentTerm <- currentTerm <$> get
@@ -148,6 +153,42 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
         , entryIssuer = ClientIssuer cid
         , entryPrevHash = hashLastLogEntry lsLastLogEntry
         }
+
+    handleClientWriteReq newSerial v =
+      case Map.lookup cid lsClientReqCache of
+        -- This is important case #1
+        Nothing -> do
+          let lsClientReqCache' = Map.insert cid (newSerial, Nothing) lsClientReqCache
+          handleNewEntry
+          pure ls { lsClientReqCache = lsClientReqCache' }
+        Just (currSerial, mResp)
+          | newSerial < currSerial -> do
+              let debugMsg s1 s2 = "Ignoring serial number " <> s1 <> ", current serial is " <> s2
+              logDebug $ debugMsg (show newSerial) (show currSerial)
+              pure ls
+          | currSerial == newSerial -> do
+              case mResp of
+                Nothing -> logDebug $ "Serial " <> show currSerial <> " already exists. Ignoring repeat request."
+                Just idx -> respondClientWrite cid idx
+              pure ls
+          -- This is important case #2
+          | succ currSerial == newSerial -> do
+              let lsClientReqCache' = Map.insert cid (newSerial, Nothing) lsClientReqCache
+              handleNewEntry
+              pure ls { lsClientReqCache = lsClientReqCache' }
+          | otherwise -> do
+              logDebug $ T.intercalate "\n" $
+                [ "Unexpected serial number from client:"
+                , "  Expected " <> show (succ currSerial) <>  " but got " <> show newSerial
+                , "  This usually means this node has been deposed as leader due to a network partition."
+                ]
+              pure ls
+      where
+        handleNewEntry = do
+          newLogEntry <- mkNewLogEntry v
+          appendLogEntries (Empty Seq.|> newLogEntry)
+          aeData <- mkAppendEntriesData ls (FromClientWriteReq newLogEntry)
+          broadcast (SendAppendEntriesRPC aeData)
 
 --------------------------------------------------------------------------------
 

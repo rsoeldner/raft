@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -9,7 +10,8 @@ import Protolude
 
 import qualified Data.Serialize as S
 
-import Raft.NodeState
+import Numeric.Natural (Natural)
+
 import Raft.Types
 
 -- | Interface for Raft nodes to send messages to clients
@@ -21,6 +23,9 @@ class Show (RaftRecvClientError m v) => RaftRecvClient m v where
   type RaftRecvClientError m v
   receiveClient :: m (Either (RaftRecvClientError m v) (ClientRequest v))
 
+newtype SerialNum = SerialNum Natural
+  deriving (Show, Read, Eq, Ord, Enum, Num, Generic, S.Serialize)
+
 -- | Representation of a client request coupled with the client id
 data ClientRequest v
   = ClientRequest ClientId (ClientReq v)
@@ -31,7 +36,7 @@ instance S.Serialize v => S.Serialize (ClientRequest v)
 -- | Representation of a client request
 data ClientReq v
   = ClientReadReq -- ^ Request the latest state of the state machine
-  | ClientWriteReq v -- ^ Write a command
+  | ClientWriteReq SerialNum v -- ^ Write a command
   deriving (Show, Generic)
 
 instance S.Serialize v => S.Serialize (ClientReq v)

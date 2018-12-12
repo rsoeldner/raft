@@ -170,17 +170,18 @@ instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
 data ConsoleState = ConsoleState
   { csNodeIds :: NodeIds -- ^ Set of node ids that the client is aware of
   , csSocket :: Socket -- ^ Client's socket
-  , csHost :: HostName -- ^ Client's host
-  , csPort :: ServiceName -- ^ Client's port
   , csLeaderId :: TVar (STM IO) (Maybe LeaderId) -- ^ Node id of the leader in the Raft network
   }
 
 newtype ConsoleT m a = ConsoleT
   { unConsoleT :: StateT ConsoleState m a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState)
+  } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState, MonadTrans)
+
+runConsoleT :: Monad m => ConsoleState -> ConsoleT m a -> m a
+runConsoleT consoleState = flip evalStateT consoleState . unConsoleT
 
 newtype ConsoleM a = ConsoleM
-  { unConsoleM :: HaskelineT (ConsoleT IO) a
+  { unConsoleM :: HaskelineT (ConsoleT RS.RaftSocketClientM) a
   } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState)
 
 instance MonadException m => MonadException (ConsoleT m) where
@@ -190,33 +191,31 @@ instance MonadException m => MonadException (ConsoleT m) where
         let run' = RunIO (fmap (ConsoleT . StateT . const) . run . flip runStateT s . unConsoleT)
         in flip runStateT s . unConsoleT <$> f run'
 
+liftRSCM = ConsoleM . lift . lift
+
 -- | Evaluate and handle each line user inputs
 handleConsoleCmd :: [Char] -> ConsoleM ()
 handleConsoleCmd input = do
   nids <- gets csNodeIds
-  clientSocket <- gets csSocket
-  clientHost <- gets csHost
-  clientPort <- gets csPort
   leaderIdT <-  gets csLeaderId
   leaderIdM <- liftIO $ atomically $ readTVar leaderIdT
-  let clientSocketEnv = RS.ClientSocketEnv clientPort clientHost clientSocket
   case L.words input of
     ["addNode", nid] -> modify (\st -> st { csNodeIds = Set.insert (toS nid) (csNodeIds st) })
     ["getNodes"] -> print nids
     ["read"] -> if nids == Set.empty
       then putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
       else do
-        respE <- liftIO $ RS.runRaftSocketClientM clientSocketEnv $ case leaderIdM of
+        respE <- liftRSCM $ case leaderIdM of
           Nothing -> RS.sendReadRndNode (Proxy :: Proxy StoreCmd) nids
           Just (LeaderId nid) -> RS.sendRead (Proxy :: Proxy StoreCmd) nid
         handleClientResponseE input respE leaderIdT
     ["incr", cmd] -> do
-      respE <- liftIO $ RS.runRaftSocketClientM clientSocketEnv $ case leaderIdM of
+      respE <- liftRSCM $ case leaderIdM of
         Nothing -> RS.sendWriteRndNode (Incr (toS cmd)) nids
         Just (LeaderId nid) -> RS.sendWrite (Incr (toS cmd)) nid
       handleClientResponseE input respE leaderIdT
     ["set", var, val] -> do
-      respE <- liftIO $ RS.runRaftSocketClientM clientSocketEnv $ case leaderIdM of
+      respE <- liftRSCM $ case leaderIdM of
         Nothing -> RS.sendWriteRndNode (Set (toS var) (read val)) nids
         Just (LeaderId nid) -> RS.sendWrite (Set (toS var) (read val)) nid
       handleClientResponseE input respE leaderIdT
@@ -261,13 +260,14 @@ main = do
       nEnv <- initNodeEnv nid
       runRaftExampleM nEnv nSocketEnv nPersistentEnv $ do
         let allNodeIds = Set.fromList (nid : nids)
+        let (host, port) = RS.nidToHostPort (toS nid)
         let nodeConfig = NodeConfig
                           { configNodeId = toS nid
                           , configNodeIds = allNodeIds
                           , configElectionTimeout = (1500000, 3000000)
                           , configHeartbeatTimeout = 200000
                           }
-        RaftExampleM $ lift acceptForkNode :: RaftExampleM Store StoreCmd ()
+        fork $ RaftExampleM $ lift (serveClientReqs host port)
         electionTimerSeed <- liftIO randomIO
         runRaftNode nodeConfig (LogCtx LogStdout Debug) electionTimerSeed (mempty :: Store)
 
@@ -327,37 +327,29 @@ main = do
 
     initSocketEnv :: NodeId -> IO (NodeSocketEnv v)
     initSocketEnv nid = do
-      let (host, port) = RS.nidToHostPort (toS nid)
-      nodeSocket <- newSock host port
-      socketPeersTVar <- atomically (newTVar mempty)
       msgQueue <- atomically newTChan
       clientReqQueue <- atomically newTChan
       pure NodeSocketEnv
-            { nsPeers = socketPeersTVar
-            , nsSocket = nodeSocket
-            , nsMsgQueue = msgQueue
-            , nsClientReqQueue = clientReqQueue
-            }
+        { nsMsgQueue = msgQueue
+        , nsClientReqQueue = clientReqQueue
+        }
 
     clientMainHandler :: IO ()
     clientMainHandler = do
       clientPort <- RS.getFreePort
       clientSocket <- RS.newSock "localhost" clientPort
       leaderIdT <- atomically (newTVar Nothing)
-      let initClientState = ConsoleState
-                                  { csNodeIds = mempty
-                                  , csSocket = clientSocket
-                                  , csHost = "localhost"
-                                  , csPort = clientPort
-                                  , csLeaderId = leaderIdT
-                                  }
-      runConsoleT initClientState $
+      let initConsoleState = ConsoleState
+            { csNodeIds = mempty
+            , csLeaderId = leaderIdT
+            }
+          initClientSocketEnv = RS.ClientSocketEnv
+            { RS.clientPort = clientPort
+            , RS.clientHost = "localhost"
+            , RS.clientSocket = clientSocket
+            }
+      RS.runRaftSocketClientM initClientSocketEnv . runConsoleT initConsoleState $
         evalRepl (pure ">>> ") (unConsoleM . handleConsoleCmd) [] Nothing (Word completer) (pure ())
-
-    runConsoleT :: Monad m => ConsoleState -> ConsoleT m a -> m a
-    runConsoleT consoleState = flip evalStateT consoleState . unConsoleT
-
-
 
     -- Tab Completion: return a completion for partial words entered
     completer :: Monad m => WordCompleter m

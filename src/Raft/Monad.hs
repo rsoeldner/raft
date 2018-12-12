@@ -146,6 +146,10 @@ respondClientRead clientId = do
   clientReadResp <- ClientReadResponse . ClientReadResp <$> asks stateMachine
   tellAction (RespondToClient clientId clientReadResp)
 
+respondClientWrite :: ClientId -> Index -> TransitionM sm v ()
+respondClientWrite cid entryIdx =
+  tellActions [RespondToClient cid (ClientWriteResponse (ClientWriteResp entryIdx))]
+
 appendLogEntries :: Show v => Seq (Entry v) -> TransitionM sm v ()
 appendLogEntries = tellAction . AppendLogEntries
 

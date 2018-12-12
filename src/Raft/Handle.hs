@@ -23,6 +23,7 @@ import Raft.Monad
 import Raft.NodeState
 import Raft.Persistent
 import Raft.RPC
+import Raft.Types
 import Raft.Logging (LogMsg)
 
 -- | Main entry point for handling events
