@@ -25,17 +25,13 @@ import Control.Monad.Fail
 import Control.Monad.Catch
 import Control.Monad.Trans.Class
 
-import Data.Sequence ((><))
 import qualified Data.Map as Map
 import qualified Data.List as L
 import qualified Data.Set as Set
-import qualified Data.Sequence as Seq
 import qualified Data.Serialize as S
-import qualified Network.Simple.TCP as NS
-import Network.Simple.TCP
-import qualified Network.Socket as N
-import qualified Network.Socket.ByteString as NSB
+
 import Numeric.Natural
+
 import System.Console.Repline
 import System.Console.Haskeline.MonadException hiding (handle)
 import Text.Read hiding (lift)
@@ -166,8 +162,8 @@ newtype ConsoleT m a = ConsoleT
 runConsoleT :: Monad m => ConsoleState -> ConsoleT m a -> m a
 runConsoleT consoleState = flip evalStateT consoleState . unConsoleT
 
-newtype ConsoleM a = ConsoleM
-  { unConsoleM :: HaskelineT (ConsoleT RS.RaftSocketClientM) a
+newtype ConsoleM v a = ConsoleM
+  { unConsoleM :: HaskelineT (ConsoleT (RS.RaftSocketClientM v)) a
   } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState)
 
 instance MonadException m => MonadException (ConsoleT m) where
@@ -180,7 +176,7 @@ instance MonadException m => MonadException (ConsoleT m) where
 liftRSCM = ConsoleM . lift . lift
 
 -- | Evaluate and handle each line user inputs
-handleConsoleCmd :: [Char] -> ConsoleM ()
+handleConsoleCmd :: [Char] -> ConsoleM StoreCmd ()
 handleConsoleCmd input = do
   nids <- gets csNodeIds
   leaderIdT <-  gets csLeaderId
@@ -192,8 +188,8 @@ handleConsoleCmd input = do
       then putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
       else do
         respE <- liftRSCM $ case leaderIdM of
-          Nothing -> RS.sendReadRndNode (Proxy :: Proxy StoreCmd) nids
-          Just (LeaderId nid) -> RS.sendRead (Proxy :: Proxy StoreCmd) nid
+          Nothing -> RS.sendReadRndNode nids
+          Just (LeaderId nid) -> RS.sendRead nid
         handleClientResponseE input respE leaderIdT
     ["incr", cmd] -> do
       respE <- liftRSCM $ case leaderIdM of
@@ -208,7 +204,7 @@ handleConsoleCmd input = do
     _ -> print "Invalid command. Press <TAB> to see valid commands"
 
   where
-    handleClientResponseE :: [Char] -> Either [Char] (ClientResponse Store) -> TVar (STM IO) (Maybe LeaderId) -> ConsoleM ()
+    handleClientResponseE :: [Char] -> Either Text (ClientResponse Store) -> TVar (STM IO) (Maybe LeaderId) -> ConsoleM StoreCmd ()
     handleClientResponseE input eMsgE leaderIdT =
       case eMsgE of
         Left err -> liftIO $ putText (toS err)
@@ -330,7 +326,7 @@ main = do
             , csLeaderId = leaderIdT
             }
           initClientSocketEnv = RS.ClientSocketEnv
-            { RS.clientId = ClientId (hostPortToNid "localhost" clientPort)
+            { RS.clientId = ClientId (RS.hostPortToNidBS ("localhost", clientPort))
             , RS.clientSocket = clientSocket
             }
       RS.runRaftSocketClientM initClientSocketEnv . runConsoleT initConsoleState $
