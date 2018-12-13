@@ -249,8 +249,15 @@ main = do
         let nodeConfig = NodeConfig
                           { configNodeId = toS nid
                           , configNodeIds = allNodeIds
-                          , configElectionTimeout = (1500000, 3000000)
-                          , configHeartbeatTimeout = 200000
+                          -- The election timeout must be > 250ms because of the
+                          -- ineffecient way RaftSocketT implements sending of
+                          -- messages. Thus, in this example, we choose to
+                          -- multiply the timeouts by ~4 such that we can
+                          -- guarantee that followers will not timeout in the
+                          -- time it takes for a leader to heartbeat-timeout and
+                          -- send the heartbeat AppendEntriesRPC.
+                          , configElectionTimeout = (500000, 1000000)
+                          , configHeartbeatTimeout = 50000
                           }
         fork $ RaftExampleM $ lift (acceptConnections host port)
         electionTimerSeed <- liftIO randomIO

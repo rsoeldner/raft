@@ -14,7 +14,6 @@ import           Data.Bifunctor                (bimap)
 import           Data.Char                     (isDigit)
 import           Data.List                     (isInfixOf, (\\))
 import           Data.Maybe                    (isJust)
-import qualified Data.Set                      as Set
 import           Data.TreeDiff                 (ToExpr)
 import           GHC.Generics                  (Generic, Generic1)
 import           Prelude                       hiding (notElem)
@@ -28,8 +27,7 @@ import           System.Process                (ProcessHandle, StdStream (Create
                                                 callCommand, createProcess_,
                                                 getPid, getProcessExitCode,
                                                 proc, std_err, std_in, std_out,
-                                                terminateProcess,
-                                                withCreateProcess)
+                                                terminateProcess)
 import           System.Timeout                (timeout)
 import           Test.QuickCheck               (Gen, Property, arbitrary,
                                                 elements, frequency,
@@ -44,8 +42,7 @@ import           Test.StateMachine             (Concrete, GenSym, Logic (..),
                                                 genSym, opaque, prettyCommands,
                                                 reference, runCommands, (.&&),
                                                 (.//), (.<), (.==), (.>=))
-import           Test.StateMachine.Types       (Command (..), Commands (..),
-                                                Symbolic (..), Var (..), Reference(..))
+import           Test.StateMachine.Types       (Commands (..))
 import qualified Test.StateMachine.Types.Rank2 as Rank2
 import           Text.Read                     (readEither)
 
@@ -59,18 +56,29 @@ type Port = Int
 data Persistence = Fresh | Existing
   deriving (Show)
 
+data ClientHandleRefs (r :: * -> *) = ClientHandleRefs
+  { client_hin :: Reference (Opaque Handle) r
+  , client_hout :: Reference (Opaque Handle) r
+  } deriving (Show, Generic, Generic1, Rank2.Functor, Rank2.Foldable, Rank2.Traversable)
+
+deriving instance ToExpr (ClientHandleRefs Concrete)
+
+type ProcessHandleRef r = Reference (Opaque ProcessHandle) r
+
 data Action (r :: * -> *)
   = SpawnNode Port Persistence
-  | KillNode (Port, Reference (Opaque ProcessHandle) r)
-  | Set Integer
-  | Read
-  | Incr
-  | BreakConnection (Port, Reference (Opaque ProcessHandle) r)
-  | FixConnection   (Port, Reference (Opaque ProcessHandle) r)
+  | SpawnClient Port
+  | KillNode (Port, ProcessHandleRef r)
+  | Set (ClientHandleRefs r) Integer
+  | Read (ClientHandleRefs r)
+  | Incr (ClientHandleRefs r)
+  | BreakConnection (Port, ProcessHandleRef r)
+  | FixConnection   (Port, ProcessHandleRef r)
   deriving (Show, Generic1, Rank2.Functor, Rank2.Foldable, Rank2.Traversable)
 
 data Response (r :: * -> *)
-  = SpawnedNode (Reference (Opaque ProcessHandle) r)
+  = SpawnedNode (ProcessHandleRef r)
+  | SpawnedClient (ClientHandleRefs r) (ProcessHandleRef r)
   | SpawnFailed Port
   | BrokeConnection
   | FixedConnection
@@ -80,17 +88,18 @@ data Response (r :: * -> *)
   deriving (Show, Generic1, Rank2.Foldable)
 
 data Model (r :: * -> *) = Model
-  { nodes    :: [(Port, Reference (Opaque ProcessHandle) r)]
+  { nodes    :: [(Port, ProcessHandleRef r)]
+  , client   :: Maybe (ClientHandleRefs r, ProcessHandleRef r)
   , started  :: Bool
   , value    :: Maybe Integer
-  , isolated :: [(Port, Reference (Opaque ProcessHandle) r)]
+  , isolated :: [(Port, ProcessHandleRef r)]
   }
   deriving (Show, Generic)
 
 deriving instance ToExpr (Model Concrete)
 
 initModel :: Model r
-initModel = Model [] False Nothing []
+initModel = Model [] Nothing False Nothing []
 
 transition :: Data.Functor.Classes.Show1 r => Model r -> Action r -> Response r -> Model r
 transition Model {..} act resp = case (act, resp) of
@@ -101,30 +110,31 @@ transition Model {..} act resp = case (act, resp) of
            else Model { nodes = newNodes, .. }
   (SpawnNode {}, SpawnFailed _)    -> Model {..}
   (KillNode (port, _ph), Ack)      -> Model { nodes = filter ((/= port) . fst) nodes, .. }
-  (Set i, Ack)                     -> Model { value = Just i, .. }
-  (Read, Value _i)                 -> Model {..}
-  (Incr, Ack)                      -> Model { value = succ <$> value, ..}
+  (Set _ i, Ack)                     -> Model { value = Just i, .. }
+  (Read {}, Value _i)                 -> Model {..}
+  (Incr {}, Ack)                      -> Model { value = succ <$> value, ..}
   (BreakConnection node, BrokeConnection) -> Model { isolated = node:isolated, .. }
   (FixConnection (port,_), FixedConnection)  -> Model { isolated = filter ((/= port) . fst) isolated, .. }
-  (Read, Timeout)                  -> Model {..}
+  (Read {}, Timeout)                  -> Model {..}
   (Set {}, Timeout)                -> Model {..}
   (Incr {}, Timeout)               -> Model {..}
   unaccounted                      -> trace (show unaccounted) $ error "transition"
 
+-- TODO I don't think the precondition is being checked...
 precondition :: Model Symbolic -> Action Symbolic -> Logic
 precondition Model {..} act = case act of
   SpawnNode {}       -> length nodes .< 3
   KillNode  {}       -> length nodes .== 3
-  Set i              -> length nodes .== 3 .&& i .>= 0
-  Read               -> length nodes .== 3 .&& Boolean (isJust value)
-  Incr               -> length nodes .== 3 .&& Boolean (isJust value)
+  Set _ i            -> length nodes .== 3 .&& i .>= 0
+  Read _             -> length nodes .== 3 .&& Boolean (isJust value)
+  Incr _             -> length nodes .== 3 .&& Boolean (isJust value)
   BreakConnection (port, _) -> length nodes .== 3 .&& port `notElem` map fst isolated
   FixConnection   {} -> length nodes .== 3 .&& Boolean (not (null isolated))
 
 postcondition :: Model Concrete -> Action Concrete -> Response Concrete -> Logic
 postcondition Model {..} act resp = case (act, resp) of
-  (Read, Value (Right i))        -> Just i .== value
-  (Read, Value (Left e))         -> Bot .// e
+  (Read _, Value (Right i))      -> Just i .== value
+  (Read _, Value (Left e))       -> Bot .// e
   (SpawnNode {}, SpawnedNode {}) -> Top
   (SpawnNode {}, SpawnFailed {}) -> Bot .// "SpawnFailed"
   (KillNode {}, Ack)             -> Top
@@ -132,56 +142,41 @@ postcondition Model {..} act resp = case (act, resp) of
   (Incr {}, Ack)                 -> Top
   (BreakConnection {}, BrokeConnection) -> Top
   (FixConnection {}, FixedConnection)   -> Top
-  (Read,    Timeout)             -> Boolean (not (null isolated)) .// "Read timeout"
+  (Read _,    Timeout)           -> Boolean (not (null isolated)) .// "Read timeout"
   (Set {},  Timeout)             -> Boolean (not (null isolated)) .// "Set timeout"
   (Incr {}, Timeout)             -> Boolean (not (null isolated)) .// "Incr timeout"
   (_,            _)              -> Bot .// "postcondition"
 
-command :: Handle -> String -> IO (Maybe String)
-command h cmd = go
+command :: Handle -> ClientHandleRefs Concrete -> String -> IO (Maybe String)
+command h chs@ClientHandleRefs{..} cmd = do
+    eRes <- do
+      hPutStrLn h cmd
+      hPutStrLn (opaque client_hin) cmd
+      mresp <- getResponse (opaque client_hout)
+      case mresp of
+        Nothing   -> pure Nothing
+        Just resp ->
+          if "system doesn't have a leader" `isInfixOf` resp
+          then do
+            hPutStrLn h "No leader, retrying..."
+            threadDelay 100000 >> pure (Just Nothing)
+          else do
+            hPutStrLn h ("got response `" ++ resp ++ "'")
+            pure (Just (Just resp))
+    case eRes of
+      Nothing -> pure Nothing
+      -- Recurse if command successful
+      Just Nothing -> command h chs cmd
+      Just (Just resp) -> pure (Just resp)
   where
-    go :: IO (Maybe String)
-    go = do
-      let cp =
-            (proc "stack" ["exec", "raft-example", "client"])
-              { std_in  = CreatePipe
-              , std_out = CreatePipe
-              , std_err = CreatePipe -- XXX: UseHandle h
-              }
-      eRes <-
-        withCreateProcess cp $ \(Just hin) (Just hout) _herr _ph -> do
-          threadDelay 100000
-          hSetBuffering hin  NoBuffering
-          hSetBuffering hout NoBuffering
-          hPutStrLn hin "addNode localhost:3000"
-          hPutStrLn hin "addNode localhost:3001"
-          hPutStrLn hin "addNode localhost:3002"
-          hPutStrLn h cmd
-          hPutStrLn hin cmd
-          mresp <- getResponse hout
-          case mresp of
-            Nothing   -> pure Nothing
-            Just resp ->
-              if "system doesn't have a leader" `isInfixOf` resp
-              then do
-                hPutStrLn h "No leader, retrying..."
-                threadDelay 100000 >> pure (Just Nothing)
-              else do
-                hPutStrLn h ("got response `" ++ resp ++ "'")
-                pure (Just (Just resp))
-      case eRes of
-        Nothing -> pure Nothing
-        Just Nothing -> go
-        Just (Just resp) -> pure (Just resp)
-      where
-        getResponse :: Handle -> IO (Maybe String)
-        getResponse hout = do
-          mline <- timeout 1000000 (hGetLine hout)
-          case mline of
-            Nothing   -> return Nothing
-            Just line
-              | "New leader found" `isInfixOf` line -> getResponse hout
-              | otherwise -> return (Just line)
+    getResponse :: Handle -> IO (Maybe String)
+    getResponse hout = do
+      mline <- timeout 1500000 (hGetLine hout)
+      case mline of
+        Nothing   -> return Nothing
+        Just line
+          | "New leader found" `isInfixOf` line -> getResponse hout
+          | otherwise -> return (Just line)
 
 semantics :: Handle -> Action Concrete -> IO (Response Concrete)
 semantics h (SpawnNode port1 p) = do
@@ -213,17 +208,45 @@ semantics h (SpawnNode port1 p) = do
     Just ec -> do
       hPutStrLn h (show ec)
       return (SpawnFailed port1)
+
+semantics h (SpawnClient cport) = do
+  hPutStrLn h "Spawning client"
+  (Just hin, Just hout, _, ph) <- createProcess_ "raft client"
+    (proc "stack" [ "exec", "raft-example", "client" ])
+     { std_out = CreatePipe
+     , std_in  = CreatePipe
+     , std_err = CreatePipe
+     }
+
+  threadDelay 1000000
+  mec <- getProcessExitCode ph
+  case mec of
+    Just ec -> do
+      hPutStrLn h (show ec)
+      return (SpawnFailed cport)
+    Nothing -> do
+      threadDelay 100000
+      hSetBuffering hin  NoBuffering
+      hSetBuffering hout NoBuffering
+      hPutStrLn hin "addNode localhost:3000"
+      hPutStrLn hin "addNode localhost:3001"
+      hPutStrLn hin "addNode localhost:3002"
+      let refClient_hin = reference (Opaque hin)
+          refClient_hout = reference (Opaque hout)
+          clientHandleRefs = ClientHandleRefs refClient_hin refClient_hout
+      return (SpawnedClient clientHandleRefs (reference (Opaque ph)))
+
 semantics h (KillNode (_port, ph)) = do
   hPutStrLn h "Killing node"
   terminateProcess (opaque ph)
   return Ack
-semantics hs (Set i) = do
-  mresp <- command hs ("set x " ++ show i)
+semantics h (Set chs i) = do
+  mresp <- command h chs ("set x " ++ show i)
   case mresp of
     Nothing    -> return Timeout
     Just _resp -> return Ack
-semantics hs Read = do
-  mresp <- command hs "read"
+semantics h (Read chs) = do
+  mresp <- command h chs "read"
   case mresp of
     Nothing   -> return Timeout
     Just resp -> do
@@ -233,8 +256,8 @@ semantics hs Read = do
                 . snd
                 . break (== ',')
       return (Value (bimap (++ (": " ++ resp)) id (parse resp)))
-semantics hs Incr = do
-  mresp <- command hs "incr x"
+semantics h (Incr chs) = do
+  mresp <- command h chs "incr x"
   case mresp of
     Nothing    -> return Timeout
     Just _resp -> return Ack
@@ -261,20 +284,24 @@ generator Model {..}
       if started
         then flip SpawnNode Existing <$> elements ([3000..3002] \\ map fst nodes)
         else flip SpawnNode Fresh <$> elements ([3000..3002] \\ map fst nodes)
-  | otherwise        = case value of
-      Nothing -> Set <$> arbitrary
-      Just _  -> frequency $
-                   [ (1, Set <$> arbitrary)
-                   , (5, pure Incr)
-                   , (3, pure Read)
-                   , (1, KillNode <$> elements nodes)
-                   , (1, BreakConnection <$> elements nodes)
-                   ] ++ case isolated of
-                          [] -> []
-                          _ -> [(1, FixConnection <$> elements isolated)]
+  | otherwise        =
+      case client of
+        Nothing -> SpawnClient <$> elements [3003..3010]
+        Just (chs, _) ->
+          case value of
+            Nothing -> Set chs <$> arbitrary
+            Just _  -> frequency $
+              [ (1, Set chs <$> arbitrary)
+              , (5, pure (Incr chs))
+              , (3, pure (Read chs))
+              , (1, KillNode <$> elements nodes)
+              , (1, BreakConnection <$> elements nodes)
+              ] ++ case isolated of
+                     [] -> []
+                     _ -> [(1, FixConnection <$> elements isolated)]
 
 shrinker :: Action Symbolic -> [Action Symbolic]
-shrinker (Set i) = [ Set i' | i' <- shrink i ]
+shrinker (Set cph i) = [ Set cph i' | i' <- shrink i ]
 shrinker _       = []
 
 mock :: Model Symbolic -> Action Symbolic -> GenSym (Response Symbolic)
@@ -309,12 +336,14 @@ prop_sequential = withMaxSuccess 10 $ noShrinking $
 
 ------------------------------------------------------------------------
 
--- runMany :: Commands Action -> Handle -> Property
--- runMany cmds log = monadicIO $ do
---   (hist, model, res) <- runCommands (sm log) cmds
---   prettyCommands (sm log) hist (res === Ok)
---   liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
---
+runMany :: Commands Action -> Handle -> Property
+runMany cmds log = monadicIO $ do
+  (hist, model, res) <- runCommands (sm log) cmds
+  prettyCommands (sm log) hist (res === Ok)
+  liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
+
+------------------------------------------------------------------------
+
 -- swizzleClog :: Handle -> Property
 -- swizzleClog = runMany cmds
 --   where
@@ -340,3 +369,15 @@ prop_sequential = withMaxSuccess 10 $ noShrinking $
 --
 -- unit_swizzleClog :: IO ()
 -- unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)
+
+------------------------------------------------------------------------
+
+exampleUnit :: Handle -> Property
+exampleUnit = runMany cmds
+  where
+    cmds = Commands
+      [ -- Commands go here...
+      ]
+
+unit_exampleUnit :: IO ()
+unit_exampleUnit = bracket setup hClose (verboseCheck . exampleUnit)
