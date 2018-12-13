@@ -283,8 +283,8 @@ mock _m KillNode {}        = pure Ack
 mock _m Set {}             = pure Ack
 mock _m Read {}            = pure (Value (Right 0))
 mock _m Incr {}            = pure Ack
-mock _m BreakConnection {} = pure Ack
-mock _m FixConnection {}   = pure Ack
+mock _m BreakConnection {} = pure BrokeConnection
+mock _m FixConnection {}   = pure FixedConnection
 
 setup :: IO Handle
 setup = do
@@ -298,7 +298,7 @@ sm h = StateMachine initModel transition precondition postcondition
                Nothing generator Nothing shrinker (semantics h) mock
 
 prop_sequential :: Property
-prop_sequential = withMaxSuccess 5 $ noShrinking $
+prop_sequential = withMaxSuccess 10 $ noShrinking $
   forAllCommands (sm undefined) (Just 20) $ \cmds -> monadicIO $ do
     h <- liftIO setup
     let sm' = sm h
@@ -309,34 +309,34 @@ prop_sequential = withMaxSuccess 5 $ noShrinking $
 
 ------------------------------------------------------------------------
 
-runMany :: Commands Action -> Handle -> Property
-runMany cmds log = monadicIO $ do
-  (hist, model, res) <- runCommands (sm log) cmds
-  prettyCommands (sm log) hist (res === Ok)
-  liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
-
-swizzleClog :: Handle -> Property
-swizzleClog = runMany cmds
-  where
-    cmds = Commands
-      [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
-      , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
-      , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
-      , Command (Set 0) Set.empty
-      , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
-      , Command Incr Set.empty
-      , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
-      , Command Incr Set.empty
-      , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
-      , Command Incr Set.empty
-      , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
-      , Command Incr Set.empty
-      , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
-      , Command Incr Set.empty
-      , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
-      , Command Incr Set.empty
-      , Command Read Set.empty
-      ]
-
-unit_swizzleClog :: IO ()
-unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)
+-- runMany :: Commands Action -> Handle -> Property
+-- runMany cmds log = monadicIO $ do
+--   (hist, model, res) <- runCommands (sm log) cmds
+--   prettyCommands (sm log) hist (res === Ok)
+--   liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
+--
+-- swizzleClog :: Handle -> Property
+-- swizzleClog = runMany cmds
+--   where
+--     cmds = Commands
+--       [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
+--       , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
+--       , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
+--       , Command (Set 0) Set.empty
+--       , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+--       , Command Incr Set.empty
+--       , Command Read Set.empty
+--       ]
+--
+-- unit_swizzleClog :: IO ()
+-- unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)

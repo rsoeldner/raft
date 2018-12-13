@@ -97,8 +97,8 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
 
     becomeLeader :: TransitionM sm v (LeaderState v)
     becomeLeader = do
-      currentTerm <- gets currentTerm
       resetHeartbeatTimeout
+      currentTerm <- gets currentTerm
       -- In order for leaders to know which entries have been replicated or not,
       -- a "no op" log entry must be created at the start of the term. See
       -- "Client ineraction", Section 8, of https://raft.github.io/raft.pdf.
@@ -153,13 +153,13 @@ stepDown
   -> LastLogEntry v
   -> TransitionM sm v (ResultState 'Candidate v)
 stepDown sender term commitIndex lastApplied lastLogEntry = do
+  resetElectionTimeout
   send sender $
     SendRequestVoteResponseRPC $
       RequestVoteResponse
         { rvrTerm = term
         , rvrVoteGranted = True
         }
-  resetElectionTimeout
   pure $ ResultState DiscoverLeader $
     NodeFollowerState FollowerState
       { fsCurrentLeader = CurrentLeader (LeaderId sender)

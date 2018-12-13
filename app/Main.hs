@@ -184,19 +184,17 @@ handleConsoleCmd input = do
   case L.words input of
     ["addNode", nid] -> modify (\st -> st { csNodeIds = Set.insert (toS nid) (csNodeIds st) })
     ["getNodes"] -> print nids
-    ["read"] -> if nids == Set.empty
-      then putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
-      else do
-        respE <- liftRSCM $ case leaderIdM of
-          Nothing -> RS.sendReadRndNode nids
-          Just (LeaderId nid) -> RS.sendRead nid
-        handleClientResponseE input respE leaderIdT
-    ["incr", cmd] -> do
+    ["read"] -> ifNodesAdded nids $ do
+      respE <- liftRSCM $ case leaderIdM of
+        Nothing -> RS.sendReadRndNode nids
+        Just (LeaderId nid) -> RS.sendRead nid
+      handleClientResponseE input respE leaderIdT
+    ["incr", cmd] -> ifNodesAdded nids $ do
       respE <- liftRSCM $ case leaderIdM of
         Nothing -> RS.sendWriteRndNode (Incr (toS cmd)) nids
         Just (LeaderId nid) -> RS.sendWrite (Incr (toS cmd)) nid
       handleClientResponseE input respE leaderIdT
-    ["set", var, val] -> do
+    ["set", var, val] -> ifNodesAdded nids $ do
       respE <- liftRSCM $ case leaderIdM of
         Nothing -> RS.sendWriteRndNode (Set (toS var) (read val)) nids
         Just (LeaderId nid) -> RS.sendWrite (Set (toS var) (read val)) nid
@@ -204,6 +202,11 @@ handleConsoleCmd input = do
     _ -> print "Invalid command. Press <TAB> to see valid commands"
 
   where
+    ifNodesAdded nids m
+      | nids == Set.empty =
+          putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
+      | otherwise = m
+
     handleClientResponseE :: [Char] -> Either Text (ClientResponse Store) -> TVar (STM IO) (Maybe LeaderId) -> ConsoleM StoreCmd ()
     handleClientResponseE input eMsgE leaderIdT =
       case eMsgE of
@@ -249,7 +252,7 @@ main = do
                           , configElectionTimeout = (1500000, 3000000)
                           , configHeartbeatTimeout = 200000
                           }
-        fork $ RaftExampleM $ lift (serveClientReqs host port)
+        fork $ RaftExampleM $ lift (acceptConnections host port)
         electionTimerSeed <- liftIO randomIO
         runRaftNode nodeConfig LogStdout electionTimerSeed (mempty :: Store)
 

@@ -86,19 +86,19 @@ instance (MonadIO m, MonadConc m, Show v) => RaftRecvRPC (RaftSocketT v m) v whe
 runRaftSocketT :: (MonadIO m, MonadConc m) => NodeSocketEnv v -> RaftSocketT v m a -> m a
 runRaftSocketT nodeSocketEnv = flip runReaderT nodeSocketEnv . unRaftSocketT
 
-serveClientReqs
+acceptConnections
   :: forall v m. (S.Serialize v, MonadIO m, MonadConc m)
   => HostName
   -> ServiceName
   -> RaftSocketT v m ()
-serveClientReqs host port = do
+acceptConnections host port = do
   socketEnv@NodeSocketEnv{..} <- ask
-  serve (Host host) port $ \(sock', sockAddr') -> do
-    recvSockM <- recv sock' (4 * 4096)
+  serve (Host host) port $ \(sock, _) -> do
+    recvSockM <- recv sock (4 * 4096)
     case recvSockM of
       Nothing -> putText "Socket was closed on the other end"
-      Just recvSock -> case ((S.decode :: ByteString -> Either [Char] (MessageEvent v)) recvSock) of
-        Left err -> putText $ toS err
+      Just recvSock -> case S.decode recvSock of
+        Left err -> putText $ "Failed to decode message: " <> toS err
         Right (ClientRequestEvent req@(ClientRequest cid _)) ->
           atomically $ writeTChan nsClientReqQueue req
         Right (RPCMessageEvent msg) ->

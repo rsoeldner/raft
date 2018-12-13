@@ -22,6 +22,7 @@ import qualified Data.List as L
 import System.Random
 
 import Raft.Client
+import Raft.Event
 import Raft.Types
 import Examples.Raft.Socket.Common
 
@@ -60,7 +61,7 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftSocketT m) v where
     eRes <-
       liftIO $ Control.Monad.Catch.try $
         N.connect host port $ \(sock, sockAddr) ->
-          N.send sock (S.encode creq)
+          N.send sock (S.encode (ClientRequestEvent creq))
     case eRes of
       Left (err :: SomeException) ->
         pure $ Left ("Failed to send ClientWriteReq: " <> show err)
@@ -71,16 +72,17 @@ instance (S.Serialize s, MonadIO m) => RaftClientRecv (RaftSocketT m) s where
   raftClientRecv = do
     socketEnv@ClientSocketEnv{..} <- ask
     eRes <-
-      liftIO $ Control.Monad.Catch.try $
-        N.accept clientSocket $ \(sock', sockAddr') -> do
-          recvSockM <- N.recv sock' (4 * 4096)
-          case recvSockM of
-            Nothing -> pure $ Left "Received empty data from socket"
-            Just recvSock -> pure (first toS (S.decode recvSock))
-    case eRes of
-      Left (err :: SomeException) ->
-        pure $ Left ("Failed to send ClientWriteReq: " <> show err)
-      Right _ -> pure (Right ())
+      fmap (first (show :: SomeException -> Text)) $
+        liftIO $ Control.Monad.Catch.try $
+          N.accept clientSocket $ \(sock', sockAddr') -> do
+            recvSockM <- N.recv sock' (4 * 4096)
+            case recvSockM of
+              Nothing -> pure $ Left "Received empty data from socket"
+              Just recvSock -> pure (first toS (S.decode recvSock))
+    case join eRes of
+      Left err ->
+        pure $ Left ("Failed to receive ClientResponse: " <> err)
+      Right res -> pure (Right res)
 
 --------------------------------------------------------------------------------
 
