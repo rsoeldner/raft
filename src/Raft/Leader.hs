@@ -76,6 +76,9 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
                  Nothing -> panic "No last log entry issuer"
                  Just (LeaderIssuer _) -> pure lsUpdatedCommitIdx
                  Just (ClientIssuer cid sn) -> do
+                   -- If the entry has been replicated, the client _will_
+                   -- receive a response unless the leader crashes exactly at
+                   -- this moment...
                    respondClientWrite cid entryIdx sn
                    let clientReqCache = lsClientReqCache lsUpdatedCommitIdx
                        updateReqData = second (const (Just entryIdx))

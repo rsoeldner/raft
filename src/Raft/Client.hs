@@ -6,14 +6,17 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Raft.Client where
 
 import Protolude
 
+import Control.Monad.Base
 import Control.Monad.Fail
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Control
 
 import qualified Data.Serialize as S
 import Numeric.Natural (Natural)
@@ -110,6 +113,18 @@ newtype RaftClientT v m a = RaftClientT
 
 instance MonadTrans (RaftClientT v) where
   lift = RaftClientT . lift . lift
+
+deriving instance MonadBase IO m => MonadBase IO (RaftClientT v m)
+
+instance MonadTransControl (RaftClientT v) where
+    type StT (RaftClientT v) a = StT (ReaderT ClientId) (StT (StateT SerialNum) a)
+    liftWith = defaultLiftWith2 RaftClientT unRaftClientT
+    restoreT = defaultRestoreT2 RaftClientT
+
+instance (MonadBaseControl IO m) => MonadBaseControl IO (RaftClientT v m) where
+    type StM (RaftClientT v m) a = ComposeSt (RaftClientT v) m a
+    liftBaseWith    = defaultLiftBaseWith
+    restoreM        = defaultRestoreM
 
 -- This annoying instance is because of the Haskeline library, letting us use a
 -- custom monad transformer stack as the base monad of 'InputT'. IMO it should

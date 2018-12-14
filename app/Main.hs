@@ -186,18 +186,18 @@ handleConsoleCmd input = do
     ["getNodes"] -> print nids
     ["read"] -> ifNodesAdded nids $ do
       respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendReadRndNode nids
-        Just (LeaderId nid) -> RS.sendRead nid
+        Nothing -> RS.sendReadRndNode_ nids 1000000
+        Just (LeaderId nid) -> RS.sendRead_ nid 1000000
       handleClientResponseE input respE leaderIdT
     ["incr", cmd] -> ifNodesAdded nids $ do
       respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendWriteRndNode (Incr (toS cmd)) nids
-        Just (LeaderId nid) -> RS.sendWrite (Incr (toS cmd)) nid
+        Nothing -> RS.sendWriteRndNode_ nids 1000000 (Incr (toS cmd))
+        Just (LeaderId nid) -> RS.sendWrite_ nid 1000000 (Incr (toS cmd))
       handleClientResponseE input respE leaderIdT
     ["set", var, val] -> ifNodesAdded nids $ do
       respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendWriteRndNode (Set (toS var) (read val)) nids
-        Just (LeaderId nid) -> RS.sendWrite (Set (toS var) (read val)) nid
+        Nothing -> RS.sendWriteRndNode_ nids 1000000 (Set (toS var) (read val))
+        Just (LeaderId nid) -> RS.sendWrite_ nid 1000000 (Set (toS var) (read val))
       handleClientResponseE input respE leaderIdT
     _ -> print "Invalid command. Press <TAB> to see valid commands"
 
@@ -256,8 +256,8 @@ main = do
                           -- guarantee that followers will not timeout in the
                           -- time it takes for a leader to heartbeat-timeout and
                           -- send the heartbeat AppendEntriesRPC.
-                          , configElectionTimeout = (500000, 1000000)
-                          , configHeartbeatTimeout = 50000
+                          , configElectionTimeout = (1000000, 3000000)
+                          , configHeartbeatTimeout = 100000
                           }
         fork $ RaftExampleM $ lift (acceptConnections host port)
         electionTimerSeed <- liftIO randomIO
