@@ -7,14 +7,17 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Examples.Raft.Socket.Client where
 
 import Protolude
 
+import           Control.Monad.Base
 import qualified Control.Monad.Catch
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
 
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as N
@@ -26,7 +29,7 @@ import Raft.Types
 import Examples.Raft.Socket.Common
 
 import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
-
+import System.Timeout.Lifted (timeout)
 
 newtype ClientSocket
   = ClientSocket { clientSocket :: N.Socket }
@@ -38,6 +41,18 @@ newtype RaftSocketT m a
 
 instance MonadTrans RaftSocketT where
   lift = RaftSocketT . lift
+
+deriving instance MonadBase IO m => MonadBase IO (RaftSocketT m)
+
+instance MonadTransControl RaftSocketT where
+    type StT RaftSocketT a = StT (ReaderT ClientSocket) a
+    liftWith = defaultLiftWith RaftSocketT unRaftSocketT
+    restoreT = defaultRestoreT RaftSocketT
+
+instance MonadBaseControl IO m => MonadBaseControl IO (RaftSocketT m) where
+    type StM (RaftSocketT m) a = ComposeSt RaftSocketT m a
+    liftBaseWith = defaultLiftBaseWith
+    restoreM     = defaultRestoreM
 
 -- This annoying instance is because of the Haskeline library, letting us use a
 -- custom monad transformer stack as the base monad of 'InputT'. IMO it should
@@ -55,9 +70,11 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftSocketT m) v where
   raftClientSend nid creq = do
     let (host,port) = nidToHostPort nid
     eRes <-
-      liftIO $ Control.Monad.Catch.try $
+      liftIO $ Control.Monad.Catch.try $ do
+        putText $ "Trying to send to node " <> toS nid
         N.connect host port $ \(sock, sockAddr) ->
           N.send sock (S.encode (ClientRequestEvent creq))
+        putText $ "Successfully sent to node " <> toS nid
     case eRes of
       Left (err :: SomeException) ->
         pure $ Left ("Failed to send ClientWriteReq: " <> show err)

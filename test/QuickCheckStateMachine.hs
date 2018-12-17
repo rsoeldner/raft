@@ -13,7 +13,8 @@ import           Control.Monad.IO.Class        (liftIO)
 import           Data.Bifunctor                (bimap)
 import           Data.Char                     (isDigit)
 import           Data.List                     (isInfixOf, (\\))
-import           Data.Maybe                    (isJust)
+import           Data.Maybe                    (isJust, isNothing)
+import qualified Data.Set                      as Set
 import           Data.TreeDiff                 (ToExpr)
 import           GHC.Generics                  (Generic, Generic1)
 import           Prelude                       hiding (notElem)
@@ -42,7 +43,7 @@ import           Test.StateMachine             (Concrete, GenSym, Logic (..),
                                                 genSym, opaque, prettyCommands,
                                                 reference, runCommands, (.&&),
                                                 (.//), (.<), (.==), (.>=))
-import           Test.StateMachine.Types       (Commands (..))
+import           Test.StateMachine.Types       (Command(..), Commands (..), Reference(..), Symbolic(..), Var(..))
 import qualified Test.StateMachine.Types.Rank2 as Rank2
 import           Text.Read                     (readEither)
 
@@ -109,10 +110,12 @@ transition Model {..} act resp = case (act, resp) of
            then Model { nodes = newNodes, started = True, .. }
            else Model { nodes = newNodes, .. }
   (SpawnNode {}, SpawnFailed _)    -> Model {..}
+  (SpawnClient {}, SpawnedClient chrs cph) -> Model { client = Just (chrs, cph), .. }
+  (SpawnClient {}, SpawnFailed _)  -> Model {..}
   (KillNode (port, _ph), Ack)      -> Model { nodes = filter ((/= port) . fst) nodes, .. }
-  (Set _ i, Ack)                     -> Model { value = Just i, .. }
-  (Read {}, Value _i)                 -> Model {..}
-  (Incr {}, Ack)                      -> Model { value = succ <$> value, ..}
+  (Set _ i, Ack)                   -> Model { value = Just i, .. }
+  (Read {}, Value _i)              -> Model {..}
+  (Incr {}, Ack)                   -> Model { value = succ <$> value, ..}
   (BreakConnection node, BrokeConnection) -> Model { isolated = node:isolated, .. }
   (FixConnection (port,_), FixedConnection)  -> Model { isolated = filter ((/= port) . fst) isolated, .. }
   (Read {}, Timeout)                  -> Model {..}
@@ -124,6 +127,7 @@ transition Model {..} act resp = case (act, resp) of
 precondition :: Model Symbolic -> Action Symbolic -> Logic
 precondition Model {..} act = case act of
   SpawnNode {}       -> length nodes .< 3
+  SpawnClient {}     -> length nodes .== 3 .&& Boolean (isNothing client)
   KillNode  {}       -> length nodes .== 3
   Set _ i            -> length nodes .== 3 .&& i .>= 0
   Read _             -> length nodes .== 3 .&& Boolean (isJust value)
@@ -136,7 +140,9 @@ postcondition Model {..} act resp = case (act, resp) of
   (Read _, Value (Right i))      -> Just i .== value
   (Read _, Value (Left e))       -> Bot .// e
   (SpawnNode {}, SpawnedNode {}) -> Top
-  (SpawnNode {}, SpawnFailed {}) -> Bot .// "SpawnFailed"
+  (SpawnNode {}, SpawnFailed {}) -> Bot .// "SpawnFailed - Node"
+  (SpawnClient {}, SpawnedClient {}) -> Top
+  (SpawnClient {}, SpawnFailed {}) -> Bot .// "SpawnFailed - Client"
   (KillNode {}, Ack)             -> Top
   (Set {}, Ack)                  -> Top
   (Incr {}, Ack)                 -> Top
@@ -171,7 +177,7 @@ command h chs@ClientHandleRefs{..} cmd = do
   where
     getResponse :: Handle -> IO (Maybe String)
     getResponse hout = do
-      mline <- timeout 1500000 (hGetLine hout)
+      mline <- timeout 3000000 (hGetLine hout)
       case mline of
         Nothing   -> return Nothing
         Just line
@@ -306,6 +312,7 @@ shrinker _       = []
 
 mock :: Model Symbolic -> Action Symbolic -> GenSym (Response Symbolic)
 mock _m SpawnNode {}       = SpawnedNode <$> genSym
+mock _m SpawnClient {}     = SpawnedClient <$> (ClientHandleRefs <$> genSym <*> genSym) <*> genSym
 mock _m KillNode {}        = pure Ack
 mock _m Set {}             = pure Ack
 mock _m Read {}            = pure (Value (Right 0))
@@ -340,31 +347,44 @@ runMany :: Commands Action -> Handle -> Property
 runMany cmds log = monadicIO $ do
   (hist, model, res) <- runCommands (sm log) cmds
   prettyCommands (sm log) hist (res === Ok)
+  -- Terminate node processes
   liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
+  -- Terminate client process
+  case client model of
+    Nothing -> pure ()
+    Just (ClientHandleRefs chin chout, cph) -> do
+      liftIO (terminateProcess (opaque cph))
+      liftIO (hClose (opaque chin) >> hClose (opaque chout))
 
 ------------------------------------------------------------------------
 
 -- swizzleClog :: Handle -> Property
 -- swizzleClog = runMany cmds
 --   where
+--     chrs = ClientHandleRefs
+--       { client_hin = Reference (Symbolic (Var 3))
+--       , client_hout = Reference (Symbolic (Var 4))
+--       }
+--
 --     cmds = Commands
 --       [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
 --       , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
 --       , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
---       , Command (Set 0) Set.empty
+--       , Command (SpawnClient 3006) (Set.fromList [ Var 3, Var 4, Var 5 ])
+--       , Command (Set chrs 0) (Set.fromList [])
 --       , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
---       , Command Incr Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
 --       , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
---       , Command Incr Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
 --       , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
---       , Command Incr Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
 --       , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
---       , Command Incr Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
 --       , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
---       , Command Incr Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
 --       , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
---       , Command Incr Set.empty
---       , Command Read Set.empty
+--       , Command (Incr chrs) (Set.fromList [])
+--       , Command (Read chrs) (Set.fromList [])
 --       ]
 --
 -- unit_swizzleClog :: IO ()

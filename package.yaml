@@ -44,6 +44,9 @@ dependencies:
 - network
 - directory
 - cryptohash-sha256 
+- lifted-base 
+- monad-control
+- transformers-base
 
 default-extensions:
   NoImplicitPrelude

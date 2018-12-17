@@ -9,13 +9,16 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Raft.Client where
 
 import Protolude
 
+import Control.Monad.Base
 import Control.Monad.Fail
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Control
 
 import qualified Data.Set as Set
 import qualified Data.Serialize as S
@@ -129,13 +132,17 @@ newtype RaftClientT v m a = RaftClientT
 instance MonadTrans (RaftClientT v) where
   lift = RaftClientT . lift . lift
 
-instance RaftClientSend m v => RaftClientSend (RaftClientT v m) v where
-  type RaftClientSendError (RaftClientT v m) v = RaftClientSendError m v
-  raftClientSend nid creq = lift (raftClientSend nid creq)
+deriving instance MonadBase IO m => MonadBase IO (RaftClientT v m)
 
-instance RaftClientRecv m s => RaftClientRecv (RaftClientT v m) s where
-  type RaftClientRecvError (RaftClientT v m) s = RaftClientRecvError m s
-  raftClientRecv = lift raftClientRecv
+instance MonadTransControl (RaftClientT v) where
+    type StT (RaftClientT v) a = StT (ReaderT RaftClientEnv) (StT (StateT RaftClientState) a)
+    liftWith = defaultLiftWith2 RaftClientT unRaftClientT
+    restoreT = defaultRestoreT2 RaftClientT
+
+instance (MonadBaseControl IO m) => MonadBaseControl IO (RaftClientT v m) where
+    type StM (RaftClientT v m) a = ComposeSt (RaftClientT v) m a
+    liftBaseWith    = defaultLiftBaseWith
+    restoreM        = defaultRestoreM
 
 -- This annoying instance is because of the Haskeline library, letting us use a
 -- custom monad transformer stack as the base monad of 'InputT'. IMO it should
@@ -147,6 +154,14 @@ instance MonadException m => MonadException (RaftClientT v m) where
       controlIO $ \(RunIO run) ->
         let run' = RunIO (fmap (RaftClientT . ReaderT . const . StateT . const) . run . flip runStateT s . flip runReaderT r . unRaftClientT)
          in fmap (flip runStateT s . flip runReaderT r . unRaftClientT) $ f run'
+
+instance RaftClientSend m v => RaftClientSend (RaftClientT v m) v where
+  type RaftClientSendError (RaftClientT v m) v = RaftClientSendError m v
+  raftClientSend nid creq = lift (raftClientSend nid creq)
+
+instance RaftClientRecv m s => RaftClientRecv (RaftClientT v m) s where
+  type RaftClientRecvError (RaftClientT v m) s = RaftClientRecvError m s
+  raftClientRecv = lift raftClientRecv
 
 runRaftClientT :: Monad m => RaftClientEnv -> RaftClientState -> RaftClientT v m a -> m a
 runRaftClientT raftClientEnv raftClientState =
