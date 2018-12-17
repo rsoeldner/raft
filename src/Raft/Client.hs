@@ -177,7 +177,7 @@ deriving instance (Show (RaftClientSendError m v), Show (RaftClientRecvError m s
 
 -- | Send a read request to the curent leader and wait for a response
 clientRead
-  :: (RaftClientSend m v, RaftClientRecv m s)
+  :: (Show (RaftClientSendError m v), RaftClientSend m v, RaftClientRecv m s)
   => RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
 clientRead = do
   eSend <- clientSendRead
@@ -199,7 +199,7 @@ clientRead_ nid = do
 
 -- | Send a write request to the current leader and wait for a response
 clientWrite
-  :: (RaftClientSend m v, RaftClientRecv m s)
+  :: (Show (RaftClientSendError m v), RaftClientSend m v, RaftClientRecv m s)
   => v
   -> RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
 clientWrite cmd = do
@@ -225,7 +225,7 @@ clientWrite_ nid cmd = do
 
 -- | Send a read request to the current leader. Nonblocking.
 clientSendRead
-  :: RaftClientSend m v
+  :: (Show (RaftClientSendError m v), RaftClientSend m v)
   => RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendRead =
   asks raftClientId >>= \cid ->
@@ -241,7 +241,7 @@ clientSendReadTo nid =
 
 -- | Send a write request to the current leader. Nonblocking.
 clientSendWrite
-  :: RaftClientSend m v
+  :: (Show (RaftClientSendError m v), RaftClientSend m v)
   => v
   -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendWrite v = do
@@ -260,16 +260,20 @@ clientSendWriteTo nid v =
     clientSendTo nid (ClientRequest cid (ClientWriteReq sn v))
 
 -- | Send a request to the current leader. Nonblocking.
+-- Warning: This function will recurse forever if send always fails.
 clientSend
-  :: RaftClientSend m v
+  :: (Show (RaftClientSendError m v), RaftClientSend m v)
   => ClientRequest v
   -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSend creq = do
   currLeader <- gets raftClientCurrentLeader
   case currLeader of
     NoLeader -> clientSendRandom creq
-    CurrentLeader (LeaderId nid) ->
-      raftClientSend nid creq
+    CurrentLeader (LeaderId nid) -> do
+      eRes <- raftClientSend nid creq
+      case eRes of
+        Left err -> clientSendRandom creq
+        Right resp -> pure (Right resp)
 
 -- | Send a request to a specific raft node, ignoring the current leader.
 -- This function is used in testing.
@@ -280,10 +284,11 @@ clientSendTo
   -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendTo nid creq = raftClientSend nid creq
 
--- | Send a request to a random node; This function is used if there is no
--- leader.
+-- | Send a request to a random node.
+-- This function is used if there is no leader.
+-- Warning: This function will recurse forever if send always fails.
 clientSendRandom
-  :: RaftClientSend m v
+  :: (Show (RaftClientSendError m v), RaftClientSend m v)
   => ClientRequest v
   -> RaftClientT v m (Either (RaftClientSendError m v) ())
 clientSendRandom creq = do
@@ -294,7 +299,10 @@ clientSendRandom creq = do
     Nothing -> panic "No raft nodes known by client"
     Just nid -> do
       modify $ \s -> s { raftClientRandomGen = newRandomGen }
-      raftClientSend nid creq
+      eRes <- raftClientSend nid creq
+      case eRes of
+        Left err -> traceM ("clientSendRandom: " <> show err) >> clientSendRandom creq
+        Right resp -> pure (Right resp)
 
 -- | Wait for a response from the current leader.
 -- This function handles leader changes and write request serial numbers.

@@ -71,10 +71,12 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftSocketT m) v where
     let (host,port) = nidToHostPort nid
     eRes <-
       liftIO $ Control.Monad.Catch.try $ do
-        putText $ "Trying to send to node " <> toS nid
+        -- Warning: blocks if socket is allocated by OS, even though the socket
+        -- may have been closed by the running process
+        putText $ "Sending ClientReq to " <> toS nid <> "..."
         N.connect host port $ \(sock, sockAddr) ->
           N.send sock (S.encode (ClientRequestEvent creq))
-        putText $ "Successfully sent to node " <> toS nid
+        putText $ "Successfully sent ClientReq to " <> toS nid <> "!"
     case eRes of
       Left (err :: SomeException) ->
         pure $ Left ("Failed to send ClientWriteReq: " <> show err)

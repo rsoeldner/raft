@@ -358,37 +358,37 @@ runMany cmds log = monadicIO $ do
 
 ------------------------------------------------------------------------
 
--- swizzleClog :: Handle -> Property
--- swizzleClog = runMany cmds
---   where
---     chrs = ClientHandleRefs
---       { client_hin = Reference (Symbolic (Var 3))
---       , client_hout = Reference (Symbolic (Var 4))
---       }
---
---     cmds = Commands
---       [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
---       , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
---       , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
---       , Command (SpawnClient 3006) (Set.fromList [ Var 3, Var 4, Var 5 ])
---       , Command (Set chrs 0) (Set.fromList [])
---       , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
---       , Command (Incr chrs) (Set.fromList [])
---       , Command (Read chrs) (Set.fromList [])
---       ]
---
--- unit_swizzleClog :: IO ()
--- unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)
+swizzleClog :: Handle -> Property
+swizzleClog = runMany cmds
+  where
+    chrs = ClientHandleRefs
+      { client_hin = Reference (Symbolic (Var 3))
+      , client_hout = Reference (Symbolic (Var 4))
+      }
+
+    cmds = Commands
+      [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
+      , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
+      , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
+      , Command (SpawnClient 3006) (Set.fromList [ Var 3, Var 4, Var 5 ])
+      , Command (Set chrs 0) (Set.fromList [])
+      , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (Read chrs) (Set.fromList [])
+      ]
+
+unit_swizzleClog :: IO ()
+unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)
 
 ------------------------------------------------------------------------
 
