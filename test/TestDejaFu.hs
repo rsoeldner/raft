@@ -32,7 +32,7 @@ import Test.DejaFu.Conc hiding (ThreadId)
 import Test.Tasty
 import Test.Tasty.DejaFu hiding (get)
 
-import System.Random (mkStdGen)
+import System.Random (mkStdGen, newStdGen)
 
 import TestUtils
 
@@ -227,9 +227,13 @@ runRaftTestClientM
   -> TestEventChans
   -> RaftTestClientM v a
   -> ConcIO a
-runRaftTestClientM cid chan chans =
-  let testClientEnv = TestClientEnv chan chans
-   in flip runReaderT testClientEnv . runRaftClientT cid 0
+runRaftTestClientM cid chan chans rtcm = do
+  raftClientState <- initRaftClientState <$> liftIO newStdGen
+  let raftClientEnv = RaftClientEnv cid
+      testClientEnv = TestClientEnv chan chans
+   in flip runReaderT testClientEnv
+    . runRaftClientT raftClientEnv raftClientState { raftClientRaftNodes = Map.keysSet chans }
+    $ rtcm
 
 --------------------------------------------------------------------------------
 
@@ -423,8 +427,7 @@ comprehensive eventChans clientRespChans =
 -- no longer be safe to `runRaftTestClientM` on.
 pollForReadResponse :: NodeId -> RaftTestClientM StoreCmd Store
 pollForReadResponse nid = do
-  clientSendRead nid
-  Right res <- clientRecv
+  Right res <- clientRead_ nid
   case res of
     ClientReadResponse (ClientReadResp res) -> pure res
     _ -> do
@@ -433,8 +436,7 @@ pollForReadResponse nid = do
 
 syncClientRead :: NodeId -> RaftTestClientM StoreCmd (Either CurrentLeader Store)
 syncClientRead nid = do
-  clientSendRead nid
-  Right res <- clientRecv
+  Right res <- clientRead_ nid
   case res of
     ClientReadResponse (ClientReadResp store) -> pure $ Right store
     ClientRedirectResponse (ClientRedirResp ldr) -> pure $ Left ldr
@@ -445,8 +447,7 @@ syncClientWrite
   -> StoreCmd
   -> RaftTestClientM StoreCmd (Either CurrentLeader Index)
 syncClientWrite nid cmd = do
-  clientSendWrite nid cmd
-  Right res <- clientRecv
+  Right res <- clientWrite_ nid cmd
   case res :: ClientResponse Store of
     ClientWriteResponse (ClientWriteResp idx sn) -> do
       Just nodeEventChan <- lift (asks (Map.lookup nid . testClientEnvNodeEventChans))

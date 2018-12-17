@@ -33,7 +33,6 @@ import qualified Data.Serialize as S
 import Numeric.Natural
 
 import System.Console.Repline
-import System.Console.Haskeline.MonadException hiding (handle)
 import Text.Read hiding (lift)
 import System.Random
 import qualified System.Directory as Directory
@@ -45,6 +44,7 @@ import qualified Examples.Raft.Socket.Common as RS
 
 import Examples.Raft.FileStore
 import Raft
+import Raft.Client
 
 ------------------------------
 -- State Machine & Commands --
@@ -150,55 +150,25 @@ instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
 -- - incr <var>
 --      Increment the value of a variable
 
-data ConsoleState = ConsoleState
-  { csNodeIds :: NodeIds -- ^ Set of node ids that the client is aware of
-  , csLeaderId :: TVar (STM IO) (Maybe LeaderId) -- ^ Node id of the leader in the Raft network
-  }
-
-newtype ConsoleT m a = ConsoleT
-  { unConsoleT :: StateT ConsoleState m a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState, MonadTrans)
-
-runConsoleT :: Monad m => ConsoleState -> ConsoleT m a -> m a
-runConsoleT consoleState = flip evalStateT consoleState . unConsoleT
-
 newtype ConsoleM v a = ConsoleM
-  { unConsoleM :: HaskelineT (ConsoleT (RS.RaftSocketClientM v)) a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadState ConsoleState)
+  { unConsoleM :: HaskelineT (RS.RaftSocketClientM v) a
+  } deriving (Functor, Applicative, Monad, MonadIO)
 
-instance MonadException m => MonadException (ConsoleT m) where
-  controlIO f =
-    ConsoleT $ StateT $ \s ->
-      controlIO $ \(RunIO run) ->
-        let run' = RunIO (fmap (ConsoleT . StateT . const) . run . flip runStateT s . unConsoleT)
-        in flip runStateT s . unConsoleT <$> f run'
-
-liftRSCM = ConsoleM . lift . lift
+liftRSCM = ConsoleM . lift
 
 -- | Evaluate and handle each line user inputs
 handleConsoleCmd :: [Char] -> ConsoleM StoreCmd ()
 handleConsoleCmd input = do
-  nids <- gets csNodeIds
-  leaderIdT <-  gets csLeaderId
-  leaderIdM <- liftIO $ atomically $ readTVar leaderIdT
+  nids <- liftRSCM clientGetNodes
   case L.words input of
-    ["addNode", nid] -> modify (\st -> st { csNodeIds = Set.insert (toS nid) (csNodeIds st) })
-    ["getNodes"] -> print nids
-    ["read"] -> ifNodesAdded nids $ do
-      respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendReadRndNode nids
-        Just (LeaderId nid) -> RS.sendRead nid
-      handleClientResponseE input respE leaderIdT
-    ["incr", cmd] -> ifNodesAdded nids $ do
-      respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendWriteRndNode (Incr (toS cmd)) nids
-        Just (LeaderId nid) -> RS.sendWrite (Incr (toS cmd)) nid
-      handleClientResponseE input respE leaderIdT
+    ["addNode", nid] -> liftRSCM $ clientAddNode (toS nid)
+    ["getNodes"] -> print =<< liftRSCM clientGetNodes
+    ["read"] -> ifNodesAdded nids $
+      retryIfRedirect input =<< liftRSCM RS.socketClientRead
+    ["incr", cmd] -> ifNodesAdded nids $
+      retryIfRedirect input =<< liftRSCM (RS.socketClientWrite (Incr (toS cmd)))
     ["set", var, val] -> ifNodesAdded nids $ do
-      respE <- liftRSCM $ case leaderIdM of
-        Nothing -> RS.sendWriteRndNode (Set (toS var) (read val)) nids
-        Just (LeaderId nid) -> RS.sendWrite (Set (toS var) (read val)) nid
-      handleClientResponseE input respE leaderIdT
+      retryIfRedirect input =<< liftRSCM (RS.socketClientWrite (Set (toS var) (read val)))
     _ -> print "Invalid command. Press <TAB> to see valid commands"
 
   where
@@ -207,24 +177,12 @@ handleConsoleCmd input = do
           putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
       | otherwise = m
 
-    handleClientResponseE :: [Char] -> Either Text (ClientResponse Store) -> TVar (STM IO) (Maybe LeaderId) -> ConsoleM StoreCmd ()
-    handleClientResponseE input eMsgE leaderIdT =
-      case eMsgE of
+    retryIfRedirect :: [Char] -> Either Text (ClientResponse Store) -> ConsoleM StoreCmd ()
+    retryIfRedirect input eMsg =
+      case eMsg of
         Left err -> liftIO $ putText (toS err)
-        Right (ClientRedirectResponse (ClientRedirResp leader)) ->
-          case leader of
-            NoLeader -> do
-              putText "Sorry, the system doesn't have a leader at the moment"
-              liftIO $ atomically $ writeTVar leaderIdT Nothing
-            -- If the message was not sent to the leader, that node will
-            -- point to the current leader
-            CurrentLeader lid -> do
-              putText $ "New leader found: " <> show lid
-              liftIO $ atomically $ writeTVar leaderIdT (Just lid)
-              handleConsoleCmd input
-        Right (ClientReadResponse (ClientReadResp sm)) -> putText $ "Received sm: " <> show sm
-        Right (ClientWriteResponse writeResp) -> print writeResp
-
+        Right (ClientRedirectResponse _) -> handleConsoleCmd input
+        Right resp -> print resp
 
 main :: IO ()
 main = do
@@ -330,16 +288,9 @@ main = do
     clientMainHandler = do
       clientPort <- RS.getFreePort
       clientSocket <- RS.newSock "localhost" clientPort
-      leaderIdT <- atomically (newTVar Nothing)
-      let initConsoleState = ConsoleState
-            { csNodeIds = mempty
-            , csLeaderId = leaderIdT
-            }
-          initClientSocketEnv = RS.ClientSocketEnv
-            { RS.clientId = ClientId (RS.hostPortToNidBS ("localhost", clientPort))
-            , RS.clientSocket = clientSocket
-            }
-      RS.runRaftSocketClientM initClientSocketEnv . runConsoleT initConsoleState $
+      let clientId = ClientId $ RS.hostPortToNid ("localhost",clientPort)
+          initClientSocket = RS.ClientSocket clientSocket
+      RS.runRaftSocketClientM clientId mempty initClientSocket $
         evalRepl (pure ">>> ") (unConsoleM . handleConsoleCmd) [] Nothing (Word completer) (pure ())
 
     -- Tab Completion: return a completion for partial words entered

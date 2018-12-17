@@ -5,6 +5,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -17,8 +18,6 @@ import           Control.Monad.Trans.Class
 
 import qualified Data.Serialize as S
 import qualified Network.Simple.TCP as N
-import qualified Data.Set as Set
-import qualified Data.List as L
 import System.Random
 
 import Raft.Client
@@ -29,19 +28,16 @@ import Examples.Raft.Socket.Common
 import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
 
 
-data ClientSocketEnv
-  = ClientSocketEnv { clientId :: ClientId
-                    , clientSocket :: N.Socket
-                    } deriving (Show)
+newtype ClientSocket
+  = ClientSocket { clientSocket :: N.Socket }
+  deriving (Show)
 
 newtype RaftSocketT m a
-  = RaftSocketT { unRaftSocketT :: ReaderT ClientSocketEnv m a }
-  deriving newtype ( Functor, Applicative, Monad, MonadIO, MonadReader ClientSocketEnv, Alternative, MonadPlus)
+  = RaftSocketT { unRaftSocketT :: ReaderT ClientSocket m a }
+  deriving newtype ( Functor, Applicative, Monad, MonadIO, MonadReader ClientSocket, Alternative, MonadPlus)
 
 instance MonadTrans RaftSocketT where
   lift = RaftSocketT . lift
-
-type RaftSocketClientM v = RaftClientT v (RaftSocketT IO)
 
 -- This annoying instance is because of the Haskeline library, letting us use a
 -- custom monad transformer stack as the base monad of 'InputT'. IMO it should
@@ -70,7 +66,7 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftSocketT m) v where
 instance (S.Serialize s, MonadIO m) => RaftClientRecv (RaftSocketT m) s where
   type RaftClientRecvError (RaftSocketT m) s = Text
   raftClientRecv = do
-    socketEnv@ClientSocketEnv{..} <- ask
+    socketEnv@ClientSocket{..} <- ask
     eRes <-
       fmap (first (show :: SomeException -> Text)) $
         liftIO $ Control.Monad.Catch.try $
@@ -86,29 +82,29 @@ instance (S.Serialize s, MonadIO m) => RaftClientRecv (RaftSocketT m) s where
 
 --------------------------------------------------------------------------------
 
-runRaftSocketClientM :: ClientSocketEnv -> RaftSocketClientM v a -> IO a
-runRaftSocketClientM socketEnv =
-  flip runReaderT socketEnv . unRaftSocketT . runRaftClientT (clientId socketEnv) 0
+type RaftSocketClientM v = RaftClientT v (RaftSocketT IO)
 
--- | Randomly select a node from a set of nodes a send a message to it
-selectRndNode :: NodeIds -> IO NodeId
-selectRndNode nids =
-  (Set.toList nids L.!!) <$> randomRIO (0, length nids - 1)
+runRaftSocketClientM
+  :: ClientId
+  -> Set NodeId
+  -> ClientSocket
+  -> RaftSocketClientM v a
+  -> IO a
+runRaftSocketClientM cid nids socketEnv rscm = do
+  raftClientState <- initRaftClientState <$> liftIO newStdGen
+  let raftClientEnv = RaftClientEnv cid
+  flip runReaderT socketEnv
+    . unRaftSocketT
+    . runRaftClientT raftClientEnv raftClientState
+    $ rscm
 
--- | Randomly read the state of a random node
-sendReadRndNode :: (S.Serialize sm, S.Serialize v) => NodeIds -> RaftSocketClientM v (Either Text (ClientResponse sm))
-sendReadRndNode nids =
-  liftIO (selectRndNode nids) >>= sendRead
+socketClientRead
+  :: (S.Serialize s, S.Serialize v, Show (RaftClientError s v (RaftSocketClientM v)))
+  => RaftSocketClientM v (Either Text (ClientResponse s))
+socketClientRead = first show <$> clientRead
 
--- | Randomly write to a random node
-sendWriteRndNode :: (S.Serialize v, S.Serialize sm) => v -> NodeIds -> RaftSocketClientM v (Either Text (ClientResponse sm))
-sendWriteRndNode cmd nids =
-  liftIO (selectRndNode nids) >>= sendWrite cmd
-
--- | Request the state of a node. It blocks until the node responds
-sendRead :: forall v sm. (S.Serialize sm, S.Serialize v) => NodeId -> RaftSocketClientM v (Either Text (ClientResponse sm))
-sendRead nid = clientSendRead nid >> clientRecv
-
--- | Write to a node. It blocks until the node responds
-sendWrite :: (S.Serialize v, S.Serialize sm) => v -> NodeId -> RaftSocketClientM v (Either Text (ClientResponse sm))
-sendWrite cmd nid = clientSendWrite nid cmd >> clientRecv
+socketClientWrite
+  :: (S.Serialize s, S.Serialize v, Show (RaftClientError s v (RaftSocketClientM v)))
+  => v
+  -> RaftSocketClientM v (Either Text (ClientResponse s))
+socketClientWrite v = first show <$> clientWrite v
