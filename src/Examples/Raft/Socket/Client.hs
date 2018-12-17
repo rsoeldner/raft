@@ -73,10 +73,10 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftSocketT m) v where
       liftIO $ Control.Monad.Catch.try $ do
         -- Warning: blocks if socket is allocated by OS, even though the socket
         -- may have been closed by the running process
-        putText $ "Sending ClientReq to " <> toS nid <> "..."
+        -- putText $ "Sending ClientReq to " <> toS nid <> "..."
         N.connect host port $ \(sock, sockAddr) ->
           N.send sock (S.encode (ClientRequestEvent creq))
-        putText $ "Successfully sent ClientReq to " <> toS nid <> "!"
+        -- putText $ "Successfully sent ClientReq to " <> toS nid <> "!"
     case eRes of
       Left (err :: SomeException) ->
         pure $ Left ("Failed to send ClientWriteReq: " <> show err)
@@ -91,6 +91,7 @@ instance (S.Serialize s, MonadIO m) => RaftClientRecv (RaftSocketT m) s where
         liftIO $ Control.Monad.Catch.try $
           N.accept clientSocket $ \(sock', sockAddr') -> do
             recvSockM <- N.recv sock' (4 * 4096)
+            N.closeSock sock'
             case recvSockM of
               Nothing -> pure $ Left "Received empty data from socket"
               Just recvSock -> pure (first toS (S.decode recvSock))
