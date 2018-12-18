@@ -47,6 +47,7 @@ dependencies:
 - lifted-base 
 - monad-control
 - transformers-base
+- atomic-write
 
 default-extensions:
   NoImplicitPrelude

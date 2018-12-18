@@ -77,6 +77,7 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
               , fsLastApplied = csLastApplied cs
               , fsLastLogEntry = csLastLogEntry cs
               , fsTermAtAEPrevIndex = Nothing
+              , fsClientReqCache = csClientReqCache cs
               }
         NodeLeaderState ls ->
           ResultState HigherTermFoundLeader $
@@ -86,6 +87,7 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
               , fsLastApplied = lsLastApplied ls
               , fsLastLogEntry = lsLastLogEntry ls
               , fsTermAtAEPrevIndex = Nothing
+              , fsClientReqCache = lsClientReqCache ls
               }
 
 

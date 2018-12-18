@@ -121,10 +121,10 @@ runRaftSocketClientM cid nids socketEnv rscm = do
 socketClientRead
   :: (S.Serialize s, S.Serialize v, Show (RaftClientError s v (RaftSocketClientM v)))
   => RaftSocketClientM v (Either Text (ClientResponse s))
-socketClientRead = first show <$> clientRead
+socketClientRead = first show <$> clientReadTimeout 1000000
 
 socketClientWrite
   :: (S.Serialize s, S.Serialize v, Show (RaftClientError s v (RaftSocketClientM v)))
   => v
   -> RaftSocketClientM v (Either Text (ClientResponse s))
-socketClientWrite v = first show <$> clientWrite v
+socketClientWrite v = first show <$> clientWriteTimeout 1000000 v

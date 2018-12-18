@@ -66,24 +66,9 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
           -- Increment leader commit index if now a majority of followers have
           -- replicated an entry at a given term.
           lsUpdatedCommitIdx <- incrCommitIndex lsUpdatedIndices
-          if (lsCommitIndex lsUpdatedCommitIdx <= lsCommitIndex lsUpdatedIndices)
-             then pure lsUpdatedCommitIdx
-             else do
-               let lastLogEntry = lsLastLogEntry lsUpdatedCommitIdx
-                   entryIdx = lastLogEntryIndex lastLogEntry
-                   entryIssuer = lastLogEntryIssuer lastLogEntry
-               case entryIssuer of
-                 Nothing -> panic "No last log entry issuer"
-                 Just (LeaderIssuer _) -> pure lsUpdatedCommitIdx
-                 Just (ClientIssuer cid sn) -> do
-                   -- If the entry has been replicated, the client _will_
-                   -- receive a response unless the leader crashes exactly at
-                   -- this moment...
-                   respondClientWrite cid entryIdx sn
-                   let clientReqCache = lsClientReqCache lsUpdatedCommitIdx
-                       updateReqData = second (const (Just entryIdx))
-                       newClientReqCache = Map.adjust updateReqData cid clientReqCache
-                   pure lsUpdatedCommitIdx { lsClientReqCache = newClientReqCache }
+          when (lsCommitIndex lsUpdatedCommitIdx > lsCommitIndex lsUpdatedIndices) $
+            updateClientReqCacheFromIdx (lsCommitIndex lsUpdatedIndices)
+          pure lsUpdatedCommitIdx
         Just n -> handleReadReq n ls
   where
     handleReadReq :: Int -> LeaderState v -> TransitionM sm v (ResultState 'Leader v)
@@ -173,18 +158,11 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
                 Nothing -> logDebug $ "Serial " <> show currSerial <> " already exists. Ignoring repeat request."
                 Just idx -> respondClientWrite cid idx newSerial
               pure ls
-          -- This is important case #2
-          | succ currSerial == newSerial -> do
+          -- This is important case #2, where newSerial > currSerial
+          | otherwise -> do
               let lsClientReqCache' = Map.insert cid (newSerial, Nothing) lsClientReqCache
               handleNewEntry
               pure ls { lsClientReqCache = lsClientReqCache' }
-          | otherwise -> do
-              logDebug $ T.intercalate "\n" $
-                [ "Unexpected serial number from client:"
-                , "  Expected " <> show (succ currSerial) <>  " but got " <> show newSerial
-                , "  This usually means this node has been deposed as leader due to a network partition."
-                ]
-              pure ls
       where
         handleNewEntry = do
           newLogEntry <- mkNewLogEntry v newSerial

@@ -153,14 +153,18 @@ respondClientWrite cid entryIdx sn =
 appendLogEntries :: Show v => Seq (Entry v) -> TransitionM sm v ()
 appendLogEntries = tellAction . AppendLogEntries
 
+updateClientReqCacheFromIdx :: Index -> TransitionM sm v ()
+updateClientReqCacheFromIdx = tellAction . UpdateClientReqCacheFrom
+
 --------------------------------------------------------------------------------
 
 startElection
   :: Index
   -> Index
   -> LastLogEntry v
+  -> ClientWriteReqCache
   -> TransitionM sm v (CandidateState v)
-startElection commitIndex lastApplied lastLogEntry = do
+startElection commitIndex lastApplied lastLogEntry clientReqCache  = do
     resetElectionTimeout
     incrementTerm
     voteForSelf
@@ -172,6 +176,7 @@ startElection commitIndex lastApplied lastLogEntry = do
       , csLastApplied = lastApplied
       , csVotes = Set.singleton selfNodeId
       , csLastLogEntry = lastLogEntry
+      , csClientReqCache = clientReqCache
       }
   where
     requestVoteMessage = do

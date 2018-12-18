@@ -44,7 +44,7 @@ handleAppendEntries :: RPCHandler 'Candidate sm (AppendEntries v) v
 handleAppendEntries (NodeCandidateState candidateState@CandidateState{..}) sender AppendEntries {..} = do
   currentTerm <- gets currentTerm
   if currentTerm <= aeTerm
-    then stepDown sender aeTerm csCommitIndex csLastApplied csLastLogEntry
+    then stepDown sender candidateState
     else pure $ candidateResultState Noop candidateState
 
 -- | Candidates should not respond to 'AppendEntriesResponse' messages.
@@ -122,7 +122,7 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
        , lsLastLogEntry = csLastLogEntry
        , lsReadReqsHandled = 0
        , lsReadRequest = mempty
-       , lsClientReqCache = mempty
+       , lsClientReqCache = csClientReqCache
        }
 
 handleTimeout :: TimeoutHandler 'Candidate sm v
@@ -131,7 +131,7 @@ handleTimeout (NodeCandidateState candidateState@CandidateState{..}) timeout =
     HeartbeatTimeout -> pure $ candidateResultState Noop candidateState
     ElectionTimeout ->
       candidateResultState RestartElection <$>
-        startElection csCommitIndex csLastApplied csLastLogEntry
+        startElection csCommitIndex csLastApplied csLastLogEntry csClientReqCache
 
 -- | When candidates handle a client request, they respond with NoLeader, as the
 -- very reason they are candidate is because there is no leader. This is done
@@ -147,24 +147,23 @@ handleClientRequest (NodeCandidateState candidateState) (ClientRequest clientId 
 stepDown
   :: Show v
   => NodeId
-  -> Term
-  -> Index
-  -> Index
-  -> LastLogEntry v
+  -> CandidateState v
   -> TransitionM sm v (ResultState 'Candidate v)
-stepDown sender term commitIndex lastApplied lastLogEntry = do
+stepDown sender CandidateState{..} = do
   resetElectionTimeout
+  currTerm <- gets currentTerm
   send sender $
     SendRequestVoteResponseRPC $
       RequestVoteResponse
-        { rvrTerm = term
+        { rvrTerm = currTerm
         , rvrVoteGranted = True
         }
   pure $ ResultState DiscoverLeader $
     NodeFollowerState FollowerState
       { fsCurrentLeader = CurrentLeader (LeaderId sender)
-      , fsCommitIndex = commitIndex
-      , fsLastApplied = lastApplied
-      , fsLastLogEntry = lastLogEntry
+      , fsCommitIndex = csCommitIndex
+      , fsLastApplied = csLastApplied
+      , fsLastLogEntry = csLastLogEntry
       , fsTermAtAEPrevIndex = Nothing
+      , fsClientReqCache = csClientReqCache
       }

@@ -97,6 +97,7 @@ initRaftNodeState =
       , fsCurrentLeader = NoLeader
       , fsLastLogEntry = NoLogEntries
       , fsTermAtAEPrevIndex = Nothing
+      , fsClientReqCache = mempty
       }
 
 -- | The volatile state of a Raft Node
@@ -146,6 +147,9 @@ data FollowerState v = FollowerState
     -- ^ Index and term of the last log entry in the node's log
   , fsTermAtAEPrevIndex :: Maybe Term
     -- ^ The term of the log entry specified in and AppendEntriesRPC
+  , fsClientReqCache :: ClientWriteReqCache
+    -- ^ The client write request cache, growing linearly with the number of
+    -- clients
   } deriving (Show)
 
 data CandidateState v = CandidateState
@@ -157,6 +161,9 @@ data CandidateState v = CandidateState
     -- ^ Votes from other nodes in the raft network
   , csLastLogEntry :: LastLogEntry v
     -- ^ Index and term of the last log entry in the node's log
+  , csClientReqCache :: ClientWriteReqCache
+    -- ^ The client write request cache, growing linearly with the number of
+    -- clients
   } deriving (Show)
 
 -- | The type mapping the number of the read request serviced to the id of the

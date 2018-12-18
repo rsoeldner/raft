@@ -26,6 +26,7 @@ import Numeric.Natural (Natural)
 
 import System.Random
 import System.Console.Haskeline.MonadException (MonadException(..), RunIO(..))
+import System.Timeout.Lifted (timeout)
 
 import Raft.Types
 
@@ -111,6 +112,8 @@ class Monad m => RaftClientRecv m s where
   type RaftClientRecvError m s
   raftClientRecv :: m (Either (RaftClientRecvError m s) (ClientResponse s))
 
+-- | Each client may have at most one command outstanding at a time and
+-- commands must be dispatched in serial number order.
 data RaftClientState = RaftClientState
   { raftClientCurrentLeader :: CurrentLeader
   , raftClientSerialNum :: SerialNum
@@ -172,6 +175,7 @@ runRaftClientT raftClientEnv raftClientState =
 data RaftClientError s v m where
   RaftClientSendError :: RaftClientSendError m v -> RaftClientError s v m
   RaftClientRecvError :: RaftClientRecvError m s -> RaftClientError s v m
+  RaftClientTimeout   :: RaftClientError s v m
 
 deriving instance (Show (RaftClientSendError m v), Show (RaftClientRecvError m s)) => Show (RaftClientError s v m)
 
@@ -184,6 +188,13 @@ clientRead = do
   case eSend of
     Left err -> pure (Left (RaftClientSendError err))
     Right _ -> first RaftClientRecvError <$> clientRecv
+
+clientReadTimeout
+  :: (MonadBaseControl IO m, Show (RaftClientSendError m v), RaftClientSend m v, RaftClientRecv m s)
+  => Int
+  -> RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
+clientReadTimeout t =
+  clientReadWriteTimeout t clientRead
 
 -- | Send a read request to a specific raft node, regardless of leader, and wait
 -- for a response.
@@ -221,6 +232,27 @@ clientWrite_ nid cmd = do
     Left err -> pure (Left (RaftClientSendError err))
     Right _ -> first RaftClientRecvError <$> clientRecv
 
+clientWriteTimeout
+  :: (MonadBaseControl IO m, Show (RaftClientSendError m v), RaftClientSend m v, RaftClientRecv m s)
+  => Int
+  -> v
+  -> RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
+clientWriteTimeout t cmd = clientReadWriteTimeout t (clientWrite cmd)
+
+clientReadWriteTimeout
+  :: (MonadBaseControl IO m, RaftClientSend m v, RaftClientRecv m s)
+  => Int
+  -> RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
+  -> RaftClientT v m (Either (RaftClientError s v m) (ClientResponse s))
+clientReadWriteTimeout t r = do
+  mRes <- timeout t r
+  case mRes of
+    Nothing -> pure (Left RaftClientTimeout)
+    Just (Left err) -> pure (Left err)
+    Just (Right cresp) -> pure (Right cresp)
+
+--------------------------------------------------------------------------------
+-- Helpers
 --------------------------------------------------------------------------------
 
 -- | Send a read request to the current leader. Nonblocking.
@@ -318,11 +350,21 @@ clientRecv = do
         ClientWriteResponse (ClientWriteResp _ (SerialNum n)) -> do
           SerialNum m <- gets raftClientSerialNum
           if m == n
-            then do
-              modify $ \s -> s
-                { raftClientSerialNum = SerialNum (succ m) }
-              pure (Right cresp)
-            else panic "Received invalid serial number response"
+          then do
+            modify $ \s -> s
+              { raftClientSerialNum = SerialNum (succ m) }
+            pure (Right cresp)
+          else
+            -- Here, we ignore the response if we are receiving a response
+            -- regarding a previously committed write request. This regularly
+            -- happens when a write request is submitted, committed, and
+            -- responded to, but the leader subsequently dies before letting all
+            -- other nodes know that the write request has been committed.
+            if n < m
+            then clientRecv
+            else do
+              let errMsg = "Received invalid serial number response: Expected " <> show m <> " but got " <> show n
+              panic $ errMsg
         ClientRedirectResponse (ClientRedirResp currLdr) -> do
           modify $ \s -> s
             { raftClientCurrentLeader = currLdr }
