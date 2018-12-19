@@ -206,7 +206,7 @@ data TestClientEnv = TestClientEnv
   }
 
 type RaftTestClientM' = ReaderT TestClientEnv ConcIO
-type RaftTestClientM v = RaftClientT v RaftTestClientM'
+type RaftTestClientM = RaftClientT Store StoreCmd RaftTestClientM'
 
 instance RaftClientSend RaftTestClientM' StoreCmd where
   type RaftClientSendError RaftTestClientM' StoreCmd = ()
@@ -225,7 +225,7 @@ runRaftTestClientM
   :: ClientId
   -> TestClientRespChan
   -> TestEventChans
-  -> RaftTestClientM v a
+  -> RaftTestClientM a
   -> ConcIO a
 runRaftTestClientM cid chan chans rtcm = do
   raftClientState <- initRaftClientState <$> liftIO newStdGen
@@ -318,13 +318,18 @@ testConcurrentProps test expected =
         teardown = mapM_ killThread . fst
 
 leaderElection :: NodeId -> TestEventChans -> TestClientRespChans -> ConcIO Store
-leaderElection nid eventChans clientRespChans = do
-    atomically $ writeTChan nodeEventChan (TimeoutEvent ElectionTimeout)
+leaderElection nid eventChans clientRespChans =
     runRaftTestClientM client0 client0RespChan eventChans $
-      pollForReadResponse nid
+      leaderElection' nid eventChans
+  where
+     Just client0RespChan = Map.lookup client0 clientRespChans
+
+leaderElection' :: NodeId -> TestEventChans -> RaftTestClientM Store
+leaderElection' nid eventChans = do
+    lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent ElectionTimeout)
+    pollForReadResponse nid
   where
     Just nodeEventChan = Map.lookup nid eventChans
-    Just client0RespChan = Map.lookup client0 clientRespChans
 
 incrValue :: TestEventChans -> TestClientRespChans -> ConcIO (Store, Index)
 incrValue eventChans clientRespChans = do
@@ -382,20 +387,20 @@ newLeaderElection eventChans clientRespChans = do
 comprehensive :: TestEventChans -> TestClientRespChans -> ConcIO (Index, Store, CurrentLeader)
 comprehensive eventChans clientRespChans =
   runRaftTestClientM client0 client0RespChan eventChans $ do
-    leaderElection' node0
+    leaderElection'' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
     Right _ <- syncClientRead node0
 
-    leaderElection' node1
+    leaderElection'' node1
     Right idx5 <- syncClientWrite node1 (Incr "x")
     Right idx6 <- syncClientWrite node1 (Incr "y")
     Right idx7 <- syncClientWrite node1 (Set "z" 40)
     Left (CurrentLeader _) <- syncClientWrite node2 (Incr "y")
     Right _ <- syncClientRead node1
 
-    leaderElection' node2
+    leaderElection'' node2
     Right idx9 <- syncClientWrite node2 (Incr "z")
     Right idx10 <- syncClientWrite node2 (Incr "x")
     Left _ <- syncClientWrite node1 (Set "q" 100)
@@ -405,7 +410,7 @@ comprehensive eventChans clientRespChans =
     Left (CurrentLeader _) <- syncClientWrite node0 (Incr "y")
     Right _ <- syncClientRead node2
 
-    leaderElection' node0
+    leaderElection'' node0
     Right idx14 <- syncClientWrite node0 (Incr "z")
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
 
@@ -414,7 +419,7 @@ comprehensive eventChans clientRespChans =
 
     pure (idx14, store, ldr)
   where
-    leaderElection' nid = lift $ lift $ leaderElection nid eventChans clientRespChans
+    leaderElection'' nid = leaderElection' nid eventChans
     Just client0RespChan = Map.lookup client0 clientRespChans
 
 --------------------------------------------------------------------------------
@@ -425,34 +430,34 @@ comprehensive eventChans clientRespChans =
 -- SerialNum of the client requests.
 -- Warning: If read requests start to include serial numbers, this function will
 -- no longer be safe to `runRaftTestClientM` on.
-pollForReadResponse :: NodeId -> RaftTestClientM StoreCmd Store
+pollForReadResponse :: NodeId -> RaftTestClientM Store
 pollForReadResponse nid = do
-  Right res <- clientRead_ nid
-  case res of
-    ClientReadResponse (ClientReadResp res) -> pure res
+  eRes <- clientReadFrom nid
+  case eRes of
+    Right (ClientReadResp res) -> pure res
     _ -> do
       liftIO $ Control.Monad.Conc.Class.threadDelay 10000
       pollForReadResponse nid
 
-syncClientRead :: NodeId -> RaftTestClientM StoreCmd (Either CurrentLeader Store)
+syncClientRead :: NodeId -> RaftTestClientM (Either CurrentLeader Store)
 syncClientRead nid = do
-  Right res <- clientRead_ nid
-  case res of
-    ClientReadResponse (ClientReadResp store) -> pure $ Right store
-    ClientRedirectResponse (ClientRedirResp ldr) -> pure $ Left ldr
+  eRes <- clientReadFrom nid
+  case eRes of
+    Right (ClientReadResp store) -> pure $ Right store
+    Left (RaftClientUnexpectedRedirect (ClientRedirResp ldr)) -> pure $ Left ldr
     _ -> panic "Failed to recieve valid read response"
 
 syncClientWrite
   :: NodeId
   -> StoreCmd
-  -> RaftTestClientM StoreCmd (Either CurrentLeader Index)
+  -> RaftTestClientM (Either CurrentLeader Index)
 syncClientWrite nid cmd = do
-  Right res <- clientWrite_ nid cmd
-  case res :: ClientResponse Store of
-    ClientWriteResponse (ClientWriteResp idx sn) -> do
+  eRes <- clientWriteTo nid cmd
+  case eRes of
+    Right (ClientWriteResp idx sn) -> do
       Just nodeEventChan <- lift (asks (Map.lookup nid . testClientEnvNodeEventChans))
       pure $ Right idx
-    ClientRedirectResponse (ClientRedirResp ldr) -> pure $ Left ldr
+    Left (RaftClientUnexpectedRedirect (ClientRedirResp ldr)) -> pure $ Left ldr
     _ -> panic "Failed to receive client write response..."
 
 heartbeat :: TestEventChan -> ConcIO ()
@@ -461,7 +466,7 @@ heartbeat eventChan = atomically $ writeTChan eventChan (TimeoutEvent HeartbeatT
 clientReadReq :: ClientId -> Event StoreCmd
 clientReadReq cid = MessageEvent $ ClientRequestEvent $ ClientRequest cid ClientReadReq
 
-clientReadRespChan :: RaftTestClientM StoreCmd (ClientResponse Store)
+clientReadRespChan :: RaftTestClientM (ClientResponse Store)
 clientReadRespChan = do
   clientRespChan <- lift (asks testClientEnvRespChan)
   lift $ lift $ atomically $ readTChan clientRespChan

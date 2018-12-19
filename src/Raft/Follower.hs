@@ -89,9 +89,6 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
     updateCommitIndex followerState =
       case aeEntries of
         Empty ->
-          -- TODO move to action, as this should update to _true_ last log entry
-          -- that follower has written to disk, not supposed commit index
-          -- assuming leader has replicated all logs to this follower
           followerState { fsCommitIndex = aeLeaderCommit }
         _ :|> e ->
           let newCommitIndex = min aeLeaderCommit (entryIndex e)

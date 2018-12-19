@@ -45,9 +45,9 @@ data NodeSocketEnv v = NodeSocketEnv
 newtype RaftSocketT v m a = RaftSocketT { unRaftSocketT :: ReaderT (NodeSocketEnv v) m a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadReader (NodeSocketEnv v), Alternative, MonadPlus, MonadTrans)
 
-deriving instance MonadConc m => MonadThrow (RaftSocketT v m)
-deriving instance MonadConc m => MonadCatch (RaftSocketT v m)
-deriving instance MonadConc m => MonadMask (RaftSocketT v m)
+deriving instance MonadThrow m => MonadThrow (RaftSocketT v m)
+deriving instance MonadCatch m => MonadCatch (RaftSocketT v m)
+deriving instance MonadMask m => MonadMask (RaftSocketT v m)
 deriving instance MonadConc m => MonadConc (RaftSocketT v m)
 
 --------------------
@@ -57,8 +57,12 @@ deriving instance MonadConc m => MonadConc (RaftSocketT v m)
 instance (MonadIO m, MonadConc m, S.Serialize sm) => RaftSendClient (RaftSocketT v m) sm where
   sendClient clientId@(ClientId nid) msg = do
     let (cHost, cPort) = nidToHostPort (toS nid)
-    connect cHost cPort $ \(cSock, _cSockAddr) ->
-      send cSock (S.encode msg)
+    eRes <- Control.Monad.Catch.try $
+      connect cHost cPort $ \(cSock, _cSockAddr) ->
+        send cSock (S.encode msg)
+    case eRes of
+      Left (err :: SomeException) -> putText ("Failed to send Client: " <> show err)
+      Right _ -> pure ()
 
 instance (MonadIO m, MonadConc m, S.Serialize v) => RaftRecvClient (RaftSocketT v m) v where
   type RaftRecvClientError (RaftSocketT v m) v = Text

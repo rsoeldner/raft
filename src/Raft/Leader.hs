@@ -23,7 +23,6 @@ import Data.Serialize (Serialize)
 import Data.Sequence (Seq(Empty))
 import qualified Data.Set as Set
 import qualified Data.Sequence as Seq
-import qualified Data.Text as T
 
 import Raft.Config (configNodeIds)
 import Raft.NodeState

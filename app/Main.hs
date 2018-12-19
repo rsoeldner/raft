@@ -150,25 +150,28 @@ instance RaftDeleteLog (RaftExampleM Store StoreCmd) StoreCmd where
 -- - incr <var>
 --      Increment the value of a variable
 
-newtype ConsoleM v a = ConsoleM
-  { unConsoleM :: HaskelineT (RS.RaftSocketClientM v) a
+newtype ConsoleM a = ConsoleM
+  { unConsoleM :: HaskelineT (RS.RaftSocketClientM Store StoreCmd) a
   } deriving (Functor, Applicative, Monad, MonadIO)
 
 liftRSCM = ConsoleM . lift
 
 -- | Evaluate and handle each line user inputs
-handleConsoleCmd :: [Char] -> ConsoleM StoreCmd ()
+handleConsoleCmd :: [Char] -> ConsoleM ()
 handleConsoleCmd input = do
   nids <- liftRSCM clientGetNodes
   case L.words input of
     ["addNode", nid] -> liftRSCM $ clientAddNode (toS nid)
     ["getNodes"] -> print =<< liftRSCM clientGetNodes
-    ["read"] -> ifNodesAdded nids $
-      retryIfRedirect input =<< liftRSCM RS.socketClientRead
-    ["incr", cmd] -> ifNodesAdded nids $
-      retryIfRedirect input =<< liftRSCM (RS.socketClientWrite (Incr (toS cmd)))
-    ["set", var, val] -> ifNodesAdded nids $ do
-      retryIfRedirect input =<< liftRSCM (RS.socketClientWrite (Set (toS var) (read val)))
+    ["read"] ->
+      ifNodesAdded nids $
+        handleResponse =<< liftRSCM RS.socketClientRead
+    ["incr", cmd] ->
+      ifNodesAdded nids $
+        handleResponse =<< liftRSCM (RS.socketClientWrite (Incr (toS cmd)))
+    ["set", var, val] ->
+      ifNodesAdded nids $
+        handleResponse =<< liftRSCM (RS.socketClientWrite (Set (toS var) (read val)))
     _ -> print "Invalid command. Press <TAB> to see valid commands"
 
   where
@@ -177,18 +180,17 @@ handleConsoleCmd input = do
           putText "Please add some nodes to query first. Eg. `addNode localhost:3001`"
       | otherwise = m
 
-    retryIfRedirect :: [Char] -> Either Text (ClientResponse Store) -> ConsoleM StoreCmd ()
-    retryIfRedirect input eMsg =
-      case eMsg of
-        Left err -> liftIO $ putText (toS err)
-        Right (ClientRedirectResponse _) -> handleConsoleCmd input
-        Right resp -> print resp
+    handleResponse :: Show a => Either Text a -> ConsoleM ()
+    handleResponse res = do
+      case res of
+        Left err -> liftIO $ putText err
+        Right resp -> liftIO $ putText (show resp)
 
 main :: IO ()
 main = do
     args <- (toS <$>) <$> getArgs
     case args of
-      ["client"] -> clientMainHandler
+      ["client"] -> clientMain
       ("node":"fresh":nid:nids) -> do
         removeExampleFiles nid
         createExampleFiles nid
@@ -284,13 +286,14 @@ main = do
         , nsClientReqQueue = clientReqQueue
         }
 
-    clientMainHandler :: IO ()
-    clientMainHandler = do
+    clientMain :: IO ()
+    clientMain = do
+      let clientHost = "localhost"
       clientPort <- RS.getFreePort
-      clientSocket <- RS.newSock "localhost" clientPort
-      let clientId = ClientId $ RS.hostPortToNid ("localhost",clientPort)
-          initClientSocket = RS.ClientSocket clientSocket
-      RS.runRaftSocketClientM clientId mempty initClientSocket $
+      let clientId = ClientId $ RS.hostPortToNid (clientHost, clientPort)
+      clientRespChan <- RS.newClientRespChan
+      RS.runRaftSocketClientM clientId mempty clientRespChan $ do
+        fork (lift (RS.clientResponseServer clientHost clientPort))
         evalRepl (pure ">>> ") (unConsoleM . handleConsoleCmd) [] Nothing (Word completer) (pure ())
 
     -- Tab Completion: return a completion for partial words entered
