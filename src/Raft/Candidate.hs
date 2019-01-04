@@ -42,10 +42,7 @@ import Raft.Types
 
 handleAppendEntries :: RPCHandler 'Candidate sm (AppendEntries v) v
 handleAppendEntries (NodeCandidateState candidateState@CandidateState{..}) sender AppendEntries {..} = do
-  currentTerm <- gets currentTerm
-  if currentTerm <= aeTerm
-    then stepDown sender candidateState
-    else pure $ candidateResultState Noop candidateState
+  pure $ candidateResultState Noop candidateState
 
 -- | Candidates should not respond to 'AppendEntriesResponse' messages.
 handleAppendEntriesResponse :: RPCHandler 'Candidate sm AppendEntriesResponse v
@@ -97,7 +94,6 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
 
     becomeLeader :: TransitionM sm v (LeaderState v)
     becomeLeader = do
-      resetHeartbeatTimeout
       currentTerm <- gets currentTerm
       -- In order for leaders to know which entries have been replicated or not,
       -- a "no op" log entry must be created at the start of the term. See
@@ -110,6 +106,7 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
           , aedLeaderCommit = csCommitIndex
           , aedEntriesSpec = FromNewLeader noopEntry
           }
+      resetHeartbeatTimeout
       cNodeIds <- asks (configNodeIds . nodeConfig)
       let lastLogEntryIdx = entryIndex noopEntry
       pure LeaderState
@@ -141,29 +138,3 @@ handleClientRequest :: ClientReqHandler 'Candidate sm v
 handleClientRequest (NodeCandidateState candidateState) (ClientRequest clientId _) = do
   redirectClientToLeader clientId NoLeader
   pure (candidateResultState Noop candidateState)
-
---------------------------------------------------------------------------------
-
-stepDown
-  :: Show v
-  => NodeId
-  -> CandidateState v
-  -> TransitionM sm v (ResultState 'Candidate v)
-stepDown sender CandidateState{..} = do
-  resetElectionTimeout
-  currTerm <- gets currentTerm
-  send sender $
-    SendRequestVoteResponseRPC $
-      RequestVoteResponse
-        { rvrTerm = currTerm
-        , rvrVoteGranted = True
-        }
-  pure $ ResultState DiscoverLeader $
-    NodeFollowerState FollowerState
-      { fsCurrentLeader = CurrentLeader (LeaderId sender)
-      , fsCommitIndex = csCommitIndex
-      , fsLastApplied = csLastApplied
-      , fsLastLogEntry = csLastLogEntry
-      , fsTermAtAEPrevIndex = Nothing
-      , fsClientReqCache = csClientReqCache
-      }

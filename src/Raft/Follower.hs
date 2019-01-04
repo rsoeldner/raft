@@ -69,7 +69,7 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
                   -- 5. If leaderCommit > commitIndex, set commitIndex =
                   -- min(leaderCommit, index of last new entry)
                   pure (True, updateFollowerState fs)
-    resetElectionTimeout
+    when success resetElectionTimeout
     send (unLeaderId aeLeaderId) $
       SendAppendEntriesResponseRPC $
         AppendEntriesResponse
@@ -109,6 +109,7 @@ handleRequestVote ns@(NodeFollowerState fs) sender RequestVote{..} = do
     when voteGranted $ do
       modify $ \pstate ->
         pstate { votedFor = Just sender }
+      resetElectionTimeout
     send sender $
       SendRequestVoteResponseRPC $
         RequestVoteResponse

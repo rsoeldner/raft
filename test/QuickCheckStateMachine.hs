@@ -153,11 +153,11 @@ postcondition Model {..} act resp = case (act, resp) of
   (Incr {}, Timeout)             -> Boolean (not (null isolated)) .// "Incr timeout"
   (_,            _)              -> Bot .// "postcondition"
 
-command :: Handle -> ClientHandleRefs Concrete -> String -> IO (Maybe String)
-command h chs@ClientHandleRefs{..} cmd = go 3
+command :: Handle -> ClientHandleRefs Concrete -> String -> IO (Int, Maybe String)
+command h chs@ClientHandleRefs{..} cmd = go 3 0
   where
-    go 0 = pure Nothing
-    go n = do
+    go 0 unex = pure (unex, Nothing)
+    go n unex = do
       eRes <- do
         hPutStrLn h cmd
         hPutStrLn (opaque client_hin) cmd
@@ -165,20 +165,24 @@ command h chs@ClientHandleRefs{..} cmd = go 3
         case mresp of
           Nothing   -> do
             hPutStrLn h "'getResponse' timed out"
-            pure Nothing
+            pure (Just (unex, Nothing))
           Just resp ->
             if "Timeout" `isInfixOf` resp
             then do
               hPutStrLn h ("Command timed out, retrying: " ++ show resp)
-              pure (Just Nothing)
-            else do
-              hPutStrLn h ("got response `" ++ resp ++ "'")
-              pure (Just (Just resp))
+              pure (Just (unex, Nothing))
+            else if "Unexpected" `isInfixOf` resp
+              then do
+                hPutStrLn h ("Unexpected read/write response, retrying: " ++ show resp)
+                pure (Just (unex + 1, Nothing))
+              else do
+                hPutStrLn h ("got response `" ++ resp ++ "'")
+                pure (Just (unex, Just resp))
       case eRes of
-        Nothing -> pure Nothing
+        Nothing -> pure (unex, Nothing)
         -- Recurse if command successful
-        Just Nothing -> threadDelay 100000 >> go (n-1)
-        Just (Just resp) -> pure (Just resp)
+        Just (unex, Nothing) -> threadDelay 100000 >> go (n-1) unex
+        Just (unex, Just resp) -> pure (unex, Just resp)
 
     getResponse :: Handle -> IO (Maybe String)
     getResponse hout = do
@@ -254,12 +258,12 @@ semantics h (KillNode (_port, ph)) = do
   hPutStrLn h $ "Successfully killed node on port " ++ show _port
   return Ack
 semantics h (Set chs i) = do
-  mresp <- command h chs ("set x " ++ show i)
+  (_, mresp) <- command h chs ("set x " ++ show i)
   case mresp of
     Nothing    -> return Timeout
     Just _resp -> return Ack
 semantics h (Read chs) = do
-  mresp <- command h chs "read"
+  (ue, mresp) <- command h chs "read"
   case mresp of
     Nothing   -> return Timeout
     Just resp -> do
@@ -270,10 +274,10 @@ semantics h (Read chs) = do
                 . break (== ',')
       return (Value (bimap (++ (": " ++ resp)) id (parse resp)))
 semantics h (Incr chs) = do
-  mresp <- command h chs "incr x"
+  (_, mresp) <- command h chs "incr x"
   case mresp of
-    Nothing    -> return Timeout
-    Just _resp -> return Ack
+    Nothing   -> return Timeout
+    Just resp -> return Ack
 semantics h (BreakConnection (port, ph)) = do
   hPutStrLn h ("Break connection, port: " ++ show port)
   Just pid <- getPid (opaque ph)
@@ -301,15 +305,26 @@ generator Model {..}
         Just (chs, _) ->
           case value of
             Nothing -> Set chs <$> arbitrary
-            Just _  -> frequency $
-              [ (1, Set chs <$> arbitrary)
-              , (5, pure (Incr chs))
-              , (3, pure (Read chs))
-              , (1, KillNode <$> elements nodes)
-              , (1, BreakConnection <$> elements nodes)
-              ] ++ case isolated of
-                     [] -> []
-                     _ -> [(1, FixConnection <$> elements isolated)]
+            Just _
+              | length isolated <= 1 -> frequency $
+                  [ (1, Set chs <$> arbitrary)
+                  , (5, pure (Incr chs))
+                  , (3, pure (Read chs))
+                  , (1, KillNode <$> elements nodes)
+                  , (1, BreakConnection <$> elements nodes)
+                  ] ++ case isolated of
+                         [] -> []
+                         _ -> [(1, FixConnection <$> elements isolated)]
+              | otherwise ->
+                  let notIsolated = filter (\(p,_) -> not (p `elem` map fst isolated)) nodes
+                  in frequency $
+                       [ (1, KillNode <$> elements nodes)
+                       ] ++ case notIsolated of
+                              [] -> []
+                              _ -> [(1, BreakConnection <$> elements notIsolated )]
+                         ++ case isolated of
+                              [] -> []
+                              _ -> [(1, FixConnection <$> elements isolated)]
 
 shrinker :: Action Symbolic -> [Action Symbolic]
 shrinker (Set cph i) = [ Set cph i' | i' <- shrink i ]
@@ -337,7 +352,7 @@ sm h = StateMachine initModel transition precondition postcondition
                Nothing generator Nothing shrinker (semantics h) mock
 
 prop_sequential :: Property
-prop_sequential = withMaxSuccess 10 $ noShrinking $
+prop_sequential = withMaxSuccess 100 $ noShrinking $
   forAllCommands (sm undefined) (Just 20) $ \cmds -> monadicIO $ do
     h <- liftIO setup
     let sm' = sm h
@@ -367,6 +382,261 @@ runMany cmds log = monadicIO $ do
     Just (ClientHandleRefs chin chout, cph) -> do
       liftIO (terminateProcess (opaque cph))
       liftIO (hClose (opaque chin) >> hClose (opaque chout))
+
+------------------------------------------------------------------------
+
+unit_swizzleClog :: IO ()
+unit_swizzleClog = bracket setup hClose (verboseCheck . swizzleClog)
+
+swizzleClog :: Handle -> Property
+swizzleClog = runMany cmds
+  where
+    chrs = ClientHandleRefs
+      { client_hin = Reference (Symbolic (Var 3))
+      , client_hout = Reference (Symbolic (Var 4))
+      }
+
+    cmds = Commands
+      [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
+      , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
+      , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
+      , Command (SpawnClient 3006) (Set.fromList [ Var 3, Var 4, Var 5 ])
+      , Command (Set chrs 0) (Set.fromList [])
+      , Command (BreakConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (BreakConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (BreakConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3002 , Reference (Symbolic  (Var 2)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3001 , Reference (Symbolic  (Var 1)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (FixConnection ( 3000 , Reference (Symbolic  (Var 0)) )) Set.empty
+      , Command (Incr chrs) (Set.fromList [])
+      , Command (Read chrs) (Set.fromList [])
+      ]
+
+--------------------------------------------------------------------------------
+
+unit_unexpectedWriteResp :: IO ()
+unit_unexpectedWriteResp = bracket setup hClose (verboseCheck . swizzleClog)
+
+unexpectedWriteResp :: Handle -> Property
+unexpectedWriteResp = runMany cmds
+  where
+    cmds = Commands
+      [ Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 0 ])
+      , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
+      , Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 2 ])
+      , Command (SpawnClient 3008) (Set.fromList [ Var 3 , Var 4 , Var 5 ])
+      , Command
+          (Set
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               }
+             32)
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (BreakConnection ( 3001 , Reference (Symbolic (Var 1)) ))
+          (Set.fromList [])
+      , Command
+          (BreakConnection ( 3000 , Reference (Symbolic (Var 2)) ))
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (FixConnection ( 3001 , Reference (Symbolic (Var 1)) )) (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      ]
+------------------------------------------------------------------------
+
+unit_fizzleSticks :: IO ()
+unit_fizzleSticks = bracket setup hClose (verboseCheck . fizzleSticks)
+
+fizzleSticks :: Handle -> Property
+fizzleSticks = runMany cmds
+  where
+    cmds = Commands
+      [ Command (SpawnNode 3000 Fresh) (Set.fromList [ Var 0 ])
+      , Command (SpawnNode 3001 Fresh) (Set.fromList [ Var 1 ])
+      , Command (SpawnNode 3002 Fresh) (Set.fromList [ Var 2 ])
+      , Command (SpawnClient 3008) (Set.fromList [ Var 3 , Var 4 , Var 5 ])
+      , Command
+          (Set
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               }
+             7)
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Set
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               }
+             0)
+          (Set.fromList [])
+      , Command
+          (Set
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               }
+             1)
+          (Set.fromList [])
+      , Command
+          (Read
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (KillNode ( 3001 , Reference (Symbolic (Var 1) ))) (Set.fromList [])
+      , Command (SpawnNode 3001 Existing) (Set.fromList [ Var 6 ])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (BreakConnection ( 3001 , Reference (Symbolic (Var 6) )))
+          (Set.fromList [])
+      , Command
+          (FixConnection ( 3001 , Reference (Symbolic (Var 6) ))) (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (Incr
+             ClientHandleRefs
+               { client_hin = Reference (Symbolic (Var 3))
+               , client_hout = Reference (Symbolic (Var 4))
+               })
+          (Set.fromList [])
+      , Command
+          (KillNode ( 3001 , Reference (Symbolic (Var 6) ))) (Set.fromList [])
+      ]
+
+-----------------------------------------------------------------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------
 

@@ -165,9 +165,9 @@ startElection
   -> ClientWriteReqCache
   -> TransitionM sm v (CandidateState v)
 startElection commitIndex lastApplied lastLogEntry clientReqCache  = do
-    resetElectionTimeout
     incrementTerm
     voteForSelf
+    resetElectionTimeout
     broadcast =<< requestVoteMessage
     selfNodeId <- askNodeId
     -- Return new candidate state

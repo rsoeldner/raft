@@ -103,7 +103,7 @@ module Raft
   , AppendEntriesData(..)
   ) where
 
-import Protolude hiding (STM, TChan, newTChan, readTChan, writeTChan, atomically)
+import Protolude hiding (STM, TChan, newTChan, readBoundedChan, writeBoundedChan, atomically)
 
 import Control.Monad.Conc.Class
 import Control.Concurrent.STM.Timer
@@ -131,6 +131,7 @@ import Raft.Persistent
 import Raft.RPC
 import Raft.Types
 
+import Data.Time.Clock.System (getSystemTime)
 
 type EventChan m v = TChan (STM m) (Event v)
 
@@ -246,6 +247,7 @@ handleEventLoop initRSM = do
   where
     handleEventLoop' :: sm -> PersistentState -> RaftT v m ()
     handleEventLoop' stateMachine persistentState = do
+      liftIO (getSystemTime >>= \st -> putText ("(0) SystemTime (0): " <> show st))
       event <- atomically . readTChan =<< asks eventChan
       loadLogEntryTermAtAePrevLogIndex event
       raftNodeState <- get
@@ -257,6 +259,7 @@ handleEventLoop initRSM = do
       -- logDebug $ "[Log]: " <> show log
       -- Perform core state machine transition, handling the current event
       nodeConfig <- asks raftNodeConfig
+      liftIO (getSystemTime >>= \st -> putText ("(1) SystemTime (1): " <> show st))
       let transitionEnv = TransitionEnv nodeConfig stateMachine raftNodeState
           (resRaftNodeState, resPersistentState, actions, logMsgs) =
             Raft.Handle.handleEvent raftNodeState transitionEnv persistentState event
@@ -270,9 +273,11 @@ handleEventLoop initRSM = do
       -- Handle logs produced by core state machine
       handleLogs logMsgs
       -- Handle actions produced by core state machine
+      liftIO (getSystemTime >>= \st -> putText ("(2) SystemTime (2): " <> show st))
       handleActions nodeConfig actions
       -- Apply new log entries to the state machine
       resRSM <- applyLogEntries stateMachine
+      liftIO (getSystemTime >>= \st -> putText ("(3) SystemTime (3): " <> show st))
       handleEventLoop' resRSM resPersistentState
 
     -- In the case that a node is a follower receiving an AppendEntriesRPC
@@ -345,7 +350,7 @@ handleAction nodeConfig action = do
       rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
       mapConcurrently_ (lift . flip sendRPC rpcMsg) nids
     RespondToClient cid cr -> void . fork . lift $ sendClient cid cr
-    ResetTimeoutTimer tout ->
+    ResetTimeoutTimer tout -> do
       case tout of
         ElectionTimeout -> lift . resetElectionTimer =<< ask
         HeartbeatTimeout -> lift . resetHeartbeatTimer =<< ask
@@ -504,7 +509,7 @@ handleLogs logs = do
 -- | Producer for rpc message events
 rpcHandler
   :: (MonadIO m, MonadConc m, Show v, RaftRecvRPC m v)
-  => TChan (STM m) (Event v)
+  => EventChan m v
   -> RaftT v m ()
 rpcHandler eventChan =
   forever $ do
@@ -519,7 +524,7 @@ rpcHandler eventChan =
 -- | Producer for rpc message events
 clientReqHandler
   :: (MonadIO m, MonadConc m, RaftRecvClient m v)
-  => TChan (STM m) (Event v)
+  => EventChan m v
   -> RaftT v m ()
 clientReqHandler eventChan =
   forever $ do
@@ -532,15 +537,17 @@ clientReqHandler eventChan =
         atomically $ writeTChan eventChan clientReqEvent
 
 -- | Producer for the election timeout event
-electionTimeoutTimer :: MonadConc m => Timer m -> TChan (STM m) (Event v) -> m ()
+electionTimeoutTimer :: (MonadIO m, MonadConc m) => Timer m -> EventChan m v -> m ()
 electionTimeoutTimer timer eventChan =
   forever $ do
     startTimer timer >> waitTimer timer
-    atomically $ writeTChan eventChan (TimeoutEvent ElectionTimeout)
+    now <- liftIO getSystemTime
+    atomically $ writeTChan eventChan (TimeoutEvent now ElectionTimeout)
 
 -- | Producer for the heartbeat timeout event
-heartbeatTimeoutTimer :: MonadConc m => Timer m -> TChan (STM m) (Event v) -> m ()
+heartbeatTimeoutTimer :: (MonadIO m, MonadConc m) => Timer m -> EventChan m v -> m ()
 heartbeatTimeoutTimer timer eventChan =
   forever $ do
     startTimer timer >> waitTimer timer
-    atomically $ writeTChan eventChan (TimeoutEvent HeartbeatTimeout)
+    now <- liftIO getSystemTime
+    atomically $ writeTChan eventChan (TimeoutEvent now HeartbeatTimeout)

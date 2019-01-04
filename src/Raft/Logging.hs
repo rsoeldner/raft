@@ -47,8 +47,11 @@ data LogMsgData = LogMsgData
 
 logMsgToText :: LogMsg -> Text
 logMsgToText (LogMsg mt s d) =
-    maybe "" timeToText mt <> "(" <> show s <> ")" <> " " <> logMsgDataToText d
+    maybe "" sysTimeToText mt <> "(" <> show s <> ")" <> " " <> logMsgDataToText d
   where
+    sysTimeToText :: SystemTime -> Text
+    sysTimeToText (MkSystemTime s ns) = "[" <> show s <> ":" <> show ns <> "]"
+
     timeToText :: SystemTime -> Text
     timeToText sysTime = "[" <> toS (timeToText' (systemToUTCTime sysTime)) <> ":" <> show ms <> "]"
       where

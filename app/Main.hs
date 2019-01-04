@@ -216,8 +216,8 @@ main = do
                           -- guarantee that followers will not timeout in the
                           -- time it takes for a leader to heartbeat-timeout and
                           -- send the heartbeat AppendEntriesRPC.
-                          , configElectionTimeout = (1000000, 3000000)
-                          , configHeartbeatTimeout = 100000
+                          , configElectionTimeout = (150000, 300000)
+                          , configHeartbeatTimeout = 20000
                           }
         fork $ RaftExampleM $ lift (acceptConnections host port)
         electionTimerSeed <- liftIO randomIO

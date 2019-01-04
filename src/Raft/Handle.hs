@@ -153,7 +153,7 @@ handleEvent' initNodeState transitionEnv persistentState event =
             RPCMessageEvent rpcMsg -> handleRPCMessage rpcMsg
             ClientRequestEvent cr -> do
               handleClientRequest initNodeState cr
-        TimeoutEvent tout -> do
+        TimeoutEvent _ tout -> do
           handleTimeout initNodeState tout
   where
     RaftHandler{..} = mkRaftHandler initNodeState
