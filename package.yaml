@@ -43,11 +43,13 @@ dependencies:
 - word8
 - network
 - directory
-- cryptohash-sha256 
-- lifted-base 
+- cryptohash-sha256
+- lifted-base
 - monad-control
 - transformers-base
 - atomic-write
+- formatting
+- clock
 
 default-extensions:
   NoImplicitPrelude

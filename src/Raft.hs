@@ -113,6 +113,9 @@ import Control.Concurrent.Classy.Async
 import Control.Monad.Fail
 import Control.Monad.Catch
 import Control.Monad.Trans.Class
+import Formatting
+import Formatting.Clock
+import System.Clock
 
 import qualified Data.Map as Map
 import Data.Serialize (Serialize)
@@ -248,7 +251,10 @@ handleEventLoop initRSM = do
     handleEventLoop' :: sm -> PersistentState -> RaftT v m ()
     handleEventLoop' stateMachine persistentState = do
       liftIO (getSystemTime >>= \st -> putText ("(0) SystemTime (0): " <> show st))
+      start <- liftIO $ getTime Monotonic
       event <- atomically . readTChan =<< asks eventChan
+      end <- liftIO $ getTime Monotonic
+      liftIO $ fprint ("handleEventLoop (READ): " Formatting.% timeSpecs Formatting.% "\n") start end
       loadLogEntryTermAtAePrevLogIndex event
       raftNodeState <- get
       logDebug $ "[Event]: " <> show event
@@ -519,7 +525,10 @@ rpcHandler eventChan =
       Right (Left err) -> logCritical (show err)
       Right (Right rpcMsg) -> do
         let rpcMsgEvent = MessageEvent (RPCMessageEvent rpcMsg)
+        start <- liftIO $ getTime Monotonic
         atomically $ writeTChan eventChan rpcMsgEvent
+        end <- liftIO $ getTime Monotonic
+        liftIO $ fprint ("rpcHandler: " Formatting.% timeSpecs Formatting.% "\n") start end
 
 -- | Producer for rpc message events
 clientReqHandler
@@ -534,7 +543,12 @@ clientReqHandler eventChan =
       Right (Left err) -> logCritical (show err)
       Right (Right clientReq) -> do
         let clientReqEvent = MessageEvent (ClientRequestEvent clientReq)
+        start <- liftIO $ getTime Monotonic
         atomically $ writeTChan eventChan clientReqEvent
+        end <- liftIO $ getTime Monotonic
+        liftIO $ fprint ("clientReqHandler: " Formatting.% timeSpecs Formatting.% "\n") start end
+
+
 
 -- | Producer for the election timeout event
 electionTimeoutTimer :: (MonadIO m, MonadConc m) => Timer m -> EventChan m v -> m ()
@@ -542,7 +556,10 @@ electionTimeoutTimer timer eventChan =
   forever $ do
     startTimer timer >> waitTimer timer
     now <- liftIO getSystemTime
+    start <- liftIO $ getTime Monotonic
     atomically $ writeTChan eventChan (TimeoutEvent now ElectionTimeout)
+    end <- liftIO $ getTime Monotonic
+    liftIO $ fprint ("electionTimeoutTimer: " Formatting.% timeSpecs Formatting.% "\n") start end
 
 -- | Producer for the heartbeat timeout event
 heartbeatTimeoutTimer :: (MonadIO m, MonadConc m) => Timer m -> EventChan m v -> m ()
@@ -550,4 +567,7 @@ heartbeatTimeoutTimer timer eventChan =
   forever $ do
     startTimer timer >> waitTimer timer
     now <- liftIO getSystemTime
+    start <- liftIO $ getTime Monotonic
     atomically $ writeTChan eventChan (TimeoutEvent now HeartbeatTimeout)
+    end <- liftIO $ getTime Monotonic
+    liftIO $ fprint ("heartbeatTimeoutTimer: " Formatting.% timeSpecs Formatting.% "\n") start end
