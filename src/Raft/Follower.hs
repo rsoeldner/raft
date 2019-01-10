@@ -42,22 +42,22 @@ import Raft.Types
 handleAppendEntries :: forall v sm. Show v => RPCHandler 'Follower sm (AppendEntries v) v
 handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
     PersistentState{..} <- get
-    (success, newFollowerState) <-
+    (status, newFollowerState) <-
       if aeTerm < currentTerm
         -- 1. Reply false if term < currentTerm
-        then pure (False, fs)
+        then pure (undefined, fs)
         else
           case fsTermAtAEPrevIndex fs of
             Nothing
               | aePrevLogIndex == index0 -> do
                   appendLogEntries aeEntries
-                  pure (True, updateFollowerState fs)
-              | otherwise -> pure (False, fs)
+                  pure (AERSuccess, updateFollowerState fs)
+              | otherwise -> pure (undefined, fs)
             Just entryAtAePrevLogIndexTerm ->
               -- 2. Reply false if log doesn't contain an entry at
               -- prevLogIndex whose term matches prevLogTerm.
               if entryAtAePrevLogIndexTerm /= aePrevLogTerm
-                then pure (False, fs)
+                then pure (undefined, fs)
                 else do
                   -- 3. If an existing entry conflicts with a new one (same index
                   -- but different terms), delete the existing entry and all that
@@ -68,13 +68,13 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
                   appendLogEntries aeEntries
                   -- 5. If leaderCommit > commitIndex, set commitIndex =
                   -- min(leaderCommit, index of last new entry)
-                  pure (True, updateFollowerState fs)
-    when success resetElectionTimeout
+                  pure (AERSuccess, updateFollowerState fs)
+    when (status == AERSuccess) resetElectionTimeout
     send (unLeaderId aeLeaderId) $
       SendAppendEntriesResponseRPC $
         AppendEntriesResponse
           { aerTerm = currentTerm
-          , aerStatus = AERSuccess
+          , aerStatus = status
           , aerReadRequest = aeReadRequest
           }
     pure (followerResultState Noop newFollowerState)

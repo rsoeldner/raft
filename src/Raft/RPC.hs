@@ -109,7 +109,6 @@ data AppendEntriesResponse = AppendEntriesResponse
     -- ^ which read request the response corresponds to
   } deriving (Show, Generic, Serialize)
 
-
 -- | To reduce the number of rejected AppendEntries RPCs when inconsistencies between
 -- leader and followers' logs occur, the follower includes the term of the
 -- conflicting entry and the first index it stores for that term.
@@ -121,7 +120,7 @@ data AppendEntriesResponseStatus
       aerTermOfConflictingEntry :: Term
     , aerFirstIndexStoredForTerm :: Index
     }
-  deriving (Show, Generic, Serialize)
+  deriving (Eq, Show, Generic, Serialize)
 
 
 -- | Representation of the message sent by candidates to their peers to request
