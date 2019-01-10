@@ -45,17 +45,18 @@ handleAppendEntries (NodeLeaderState ls)_ _  =
   pure (leaderResultState Noop ls)
 
 handleAppendEntriesResponse :: forall sm v. RPCHandler 'Leader sm AppendEntriesResponse v
-handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
-  -- If AppendEntries fails (aerSuccess == False) because of log inconsistency,
-  -- decrement nextIndex and retry
-  | not (aerSuccess appendEntriesResp) = do
-      let newNextIndices = Map.adjust decrIndexWithDefault0 sender (lsNextIndex ls)
+handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp =
+  case aerStatus appendEntriesResp of
+    -- If AppendEntries fails because of log inconsistency,
+    -- decrement the nextIndex to the first index of the conflicting term and retry
+    AERFailure _ aerFirstIndexStoredForTerm -> do
+      let newNextIndices = Map.insert sender aerFirstIndexStoredForTerm (lsNextIndex ls)
           newLeaderState = ls { lsNextIndex = newNextIndices }
           Just newNextIndex = Map.lookup sender newNextIndices
       aeData <- mkAppendEntriesData newLeaderState (FromIndex newNextIndex)
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
-  | otherwise = do
+    AERSuccess ->
       case aerReadRequest appendEntriesResp of
         Nothing -> leaderResultState Noop <$> do
           let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)

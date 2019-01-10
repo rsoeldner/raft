@@ -74,7 +74,7 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
       SendAppendEntriesResponseRPC $
         AppendEntriesResponse
           { aerTerm = currentTerm
-          , aerSuccess = success
+          , aerStatus = AERSuccess
           , aerReadRequest = aeReadRequest
           }
     pure (followerResultState Noop newFollowerState)

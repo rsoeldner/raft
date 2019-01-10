@@ -103,11 +103,26 @@ data AppendEntries v = AppendEntries
 data AppendEntriesResponse = AppendEntriesResponse
   { aerTerm :: Term
     -- ^ current term for leader to update itself
-  , aerSuccess :: Bool
+  , aerStatus :: AppendEntriesResponseStatus
     -- ^ true if follower contained entry matching aePrevLogIndex and aePrevLogTerm
   , aerReadRequest :: Maybe Int
     -- ^ which read request the response corresponds to
   } deriving (Show, Generic, Serialize)
+
+
+-- | To reduce the number of rejected AppendEntries RPCs when inconsistencies between
+-- leader and followers' logs occur, the follower includes the term of the
+-- conflicting entry and the first index it stores for that term.
+-- The leader can then decrement the nextIndex accordingly and bypass all the
+-- conflicting entries.
+data AppendEntriesResponseStatus
+  = AERSuccess
+  | AERFailure {
+      aerTermOfConflictingEntry :: Term
+    , aerFirstIndexStoredForTerm :: Index
+    }
+  deriving (Show, Generic, Serialize)
+
 
 -- | Representation of the message sent by candidates to their peers to request
 -- their vote
