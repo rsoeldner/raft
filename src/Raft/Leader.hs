@@ -47,9 +47,11 @@ handleAppendEntries (NodeLeaderState ls)_ _  =
 handleAppendEntriesResponse :: forall sm v. RPCHandler 'Leader sm AppendEntriesResponse v
 handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp =
   case aerStatus appendEntriesResp of
+    -- TODO document
+    AERStaleTerm -> pure (leaderResultState Noop ls)
     -- If AppendEntries fails because of log inconsistency,
     -- decrement the nextIndex to the first index of the conflicting term and retry
-    AERFailure _ aerFirstIndexStoredForTerm -> do
+    AERConflict _ aerFirstIndexStoredForTerm -> do
       let newNextIndices = Map.insert sender aerFirstIndexStoredForTerm (lsNextIndex ls)
           newLeaderState = ls { lsNextIndex = newNextIndices }
           Just newNextIndex = Map.lookup sender newNextIndices

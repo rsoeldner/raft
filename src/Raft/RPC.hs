@@ -116,7 +116,8 @@ data AppendEntriesResponse = AppendEntriesResponse
 -- conflicting entries.
 data AppendEntriesResponseStatus
   = AERSuccess
-  | AERFailure {
+  | AERStaleTerm
+  | AERConflict {
       aerTermOfConflictingEntry :: Term
     , aerFirstIndexStoredForTerm :: Index
     }
