@@ -58,7 +58,6 @@ handleAppendEntries' PersistentState{..} fs sender AppendEntries{..} =
     -- 1. Reply false if term < currentTerm
     then pure (AERStaleTerm, fs)
     else
-      --
       case fsTermAtAEPrevIndex fs of
         Nothing
           -- there are no previous entries
@@ -67,9 +66,8 @@ handleAppendEntries' PersistentState{..} fs sender AppendEntries{..} =
               pure (AERSuccess, updateFollowerState fs)
           -- the follower doesn't have the previous index given in the AppendEntriesRPC
           | otherwise -> do
-              let conflict = AERConflict {
-                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term? may also not be needed altogether
-                , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
+              let conflict = AERInconsistent {
+                  aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
                 }
               pure (conflict, fs)
         Just entryAtAEPrevLogIndexTerm ->
@@ -77,9 +75,8 @@ handleAppendEntries' PersistentState{..} fs sender AppendEntries{..} =
           -- prevLogIndex whose term matches prevLogTerm.
           if entryAtAEPrevLogIndexTerm /= aePrevLogTerm
             then do
-              let conflict = AERConflict {
-                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term? may also not be needed altogether
-                , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
+              let conflict = AERInconsistent {
+                  aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
                 }
               pure (conflict, fs)
             else do

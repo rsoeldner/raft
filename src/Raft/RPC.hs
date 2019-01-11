@@ -117,9 +117,8 @@ data AppendEntriesResponse = AppendEntriesResponse
 data AppendEntriesResponseStatus
   = AERSuccess
   | AERStaleTerm -- ^ term given was stale (older) then followers term
-  | AERConflict {
-      aerTermOfConflictingEntry :: Term
-    , aerFirstIndexStoredForTerm :: Index
+  | AERInconsistent {
+      aerFirstIndexStoredForTerm :: Index
     }
   deriving (Eq, Show, Generic, Serialize)
 
