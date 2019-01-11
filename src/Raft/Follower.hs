@@ -57,8 +57,15 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
               -- 2. Reply false if log doesn't contain an entry at
               -- prevLogIndex whose term matches prevLogTerm.
               if entryAtAePrevLogIndexTerm /= aePrevLogTerm
-                then do
-                  pure (undefined, fs)
+                then
+                  case fsFirstIndexStoredForTerm fs of
+                    Nothing -> pure (undefined, fs) -- TODO
+                    Just firstIndexStoredForTerm -> do
+                      let conflict = AERConflict {
+                          aerTermOfConflictingEntry = entryAtAePrevLogIndexTerm
+                        , aerFirstIndexStoredForTerm = firstIndexStoredForTerm
+                        }
+                      pure (conflict, fs)
                 else do
                   -- 3. If an existing entry conflicts with a new one (same index
                   -- but different terms), delete the existing entry and all that
