@@ -63,14 +63,19 @@ handleAppendEntries' PersistentState{..} fs sender AppendEntries{..} =
           | aePrevLogIndex == index0 -> do
               appendLogEntries aeEntries
               pure (AERSuccess, updateFollowerState fs)
-          | otherwise -> pure (AERStaleTerm, fs)
+          | otherwise -> do
+              let conflict = AERConflict {
+                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term? may also not be needed altogether
+                , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
+                }
+              pure (conflict, fs)
         Just entryAtAePrevLogIndexTerm ->
           -- 2. Reply false if log doesn't contain an entry at
           -- prevLogIndex whose term matches prevLogTerm.
           if entryAtAePrevLogIndexTerm /= aePrevLogTerm
             then do
               let conflict = AERConflict {
-                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term?
+                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term? may also not be needed altogether
                 , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
                 }
               pure (conflict, fs)
