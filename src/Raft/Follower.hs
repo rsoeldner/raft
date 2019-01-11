@@ -40,49 +40,51 @@ import Raft.Types
 -- Note: see 'PersistentState' datatype for discussion about not keeping the
 -- entire log in memory.
 handleAppendEntries :: forall v sm. Show v => RPCHandler 'Follower sm (AppendEntries v) v
-handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
-    PersistentState{..} <- get
-    (status, newFollowerState) <-
-      if aeTerm < currentTerm
-        -- 1. Reply false if term < currentTerm
-        then pure (AERStaleTerm, fs)
-        else
-          case fsTermAtAEPrevIndex fs of
-            Nothing
-              | aePrevLogIndex == index0 -> do
-                  appendLogEntries aeEntries
-                  pure (AERSuccess, updateFollowerState fs)
-              | otherwise -> pure (AERStaleTerm, fs)
-            Just entryAtAePrevLogIndexTerm ->
-              -- 2. Reply false if log doesn't contain an entry at
-              -- prevLogIndex whose term matches prevLogTerm.
-              if entryAtAePrevLogIndexTerm /= aePrevLogTerm
-                then do
-                      let conflict = AERConflict {
-                          aerTermOfConflictingEntry = currentTerm -- TODO is this the right term?
-                        , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
-                        }
-                      pure (conflict, fs)
-                else do
-                  -- 3. If an existing entry conflicts with a new one (same index
-                  -- but different terms), delete the existing entry and all that
-                  -- follow it.
-                  --   &
-                  -- 4. Append any new entries not already in the log
-                  -- (emits an action that accomplishes 3 & 4
-                  appendLogEntries aeEntries
-                  -- 5. If leaderCommit > commitIndex, set commitIndex =
-                  -- min(leaderCommit, index of last new entry)
-                  pure (AERSuccess, updateFollowerState fs)
+handleAppendEntries ns@(NodeFollowerState fs) sender ae@AppendEntries{..} = do
+    ps@PersistentState{..} <- get
+    (status, newFollowerState) <- handleAppendEntries' ps fs sender ae
     when (status == AERSuccess) resetElectionTimeout
     send (unLeaderId aeLeaderId) $
-      SendAppendEntriesResponseRPC $
+      SendAppendEntriesResponseRPC
         AppendEntriesResponse
           { aerTerm = currentTerm
           , aerStatus = status
           , aerReadRequest = aeReadRequest
           }
     pure (followerResultState Noop newFollowerState)
+
+handleAppendEntries' PersistentState{..} fs sender AppendEntries{..} =
+  if aeTerm < currentTerm
+    -- 1. Reply false if term < currentTerm
+    then pure (AERStaleTerm, fs)
+    else
+      case fsTermAtAEPrevIndex fs of
+        Nothing
+          | aePrevLogIndex == index0 -> do
+              appendLogEntries aeEntries
+              pure (AERSuccess, updateFollowerState fs)
+          | otherwise -> pure (AERStaleTerm, fs)
+        Just entryAtAePrevLogIndexTerm ->
+          -- 2. Reply false if log doesn't contain an entry at
+          -- prevLogIndex whose term matches prevLogTerm.
+          if entryAtAePrevLogIndexTerm /= aePrevLogTerm
+            then do
+              let conflict = AERConflict {
+                  aerTermOfConflictingEntry = currentTerm -- TODO is this the right term?
+                , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
+                }
+              pure (conflict, fs)
+            else do
+              -- 3. If an existing entry conflicts with a new one (same index
+              -- but different terms), delete the existing entry and all that
+              -- follow it.
+              --   &
+              -- 4. Append any new entries not already in the log
+              -- (emits an action that accomplishes 3 & 4
+              appendLogEntries aeEntries
+              -- 5. If leaderCommit > commitIndex, set commitIndex =
+              -- min(leaderCommit, index of last new entry)
+              pure (AERSuccess, updateFollowerState fs)
   where
     updateFollowerState :: FollowerState v -> FollowerState v
     updateFollowerState fs =
@@ -101,6 +103,7 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
 
     updateLeader :: FollowerState v -> FollowerState v
     updateLeader followerState = followerState { fsCurrentLeader = CurrentLeader (LeaderId sender) }
+
 
 -- | Followers should not respond to 'AppendEntriesResponse' messages.
 handleAppendEntriesResponse :: RPCHandler 'Follower sm AppendEntriesResponse v
