@@ -47,7 +47,7 @@ handleAppendEntries (NodeLeaderState ls)_ _  =
 handleAppendEntriesResponse :: forall sm v. RPCHandler 'Leader sm AppendEntriesResponse v
 handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp =
   case aerStatus appendEntriesResp of
-    -- TODO document
+    -- If a follower receivers an AppendEntries with a stale term number, it
     AERStaleTerm -> pure (leaderResultState Noop ls)
     -- If AppendEntries fails because of log inconsistency,
     -- decrement the nextIndex to the first index of the conflicting term and retry

@@ -77,6 +77,7 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
               , fsLastApplied = csLastApplied cs
               , fsLastLogEntry = csLastLogEntry cs
               , fsTermAtAEPrevIndex = Nothing
+              , fsFirstIndexStoredForTerm = Nothing
               , fsClientReqCache = csClientReqCache cs
               }
         NodeLeaderState ls ->
@@ -87,6 +88,7 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
               , fsLastApplied = lsLastApplied ls
               , fsLastLogEntry = lsLastLogEntry ls
               , fsTermAtAEPrevIndex = Nothing
+              , fsFirstIndexStoredForTerm = Nothing
               , fsClientReqCache = lsClientReqCache ls
               }
 

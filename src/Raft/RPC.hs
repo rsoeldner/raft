@@ -116,7 +116,7 @@ data AppendEntriesResponse = AppendEntriesResponse
 -- conflicting entries.
 data AppendEntriesResponseStatus
   = AERSuccess
-  | AERStaleTerm
+  | AERStaleTerm -- ^ term given was stale (older) then followers term
   | AERConflict {
       aerTermOfConflictingEntry :: Term
     , aerFirstIndexStoredForTerm :: Index
