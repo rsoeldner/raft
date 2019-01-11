@@ -57,13 +57,10 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
               -- 2. Reply false if log doesn't contain an entry at
               -- prevLogIndex whose term matches prevLogTerm.
               if entryAtAePrevLogIndexTerm /= aePrevLogTerm
-                then
-                  case fsFirstIndexStoredForTerm fs of
-                    Nothing -> pure (undefined, fs) -- TODO
-                    Just firstIndexStoredForTerm -> do
+                then do
                       let conflict = AERConflict {
-                          aerTermOfConflictingEntry = entryAtAePrevLogIndexTerm
-                        , aerFirstIndexStoredForTerm = firstIndexStoredForTerm
+                          aerTermOfConflictingEntry = currentTerm -- TODO is this the right term?
+                        , aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
                         }
                       pure (conflict, fs)
                 else do

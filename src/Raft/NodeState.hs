@@ -99,7 +99,7 @@ initRaftNodeState =
       , fsCurrentLeader = NoLeader
       , fsLastLogEntry = NoLogEntries
       , fsTermAtAEPrevIndex = Nothing
-      , fsFirstIndexStoredForTerm = Just index0
+      , fsFirstIndexStoredForTerm = index0
       , fsClientReqCache = mempty
       }
 
@@ -150,7 +150,7 @@ data FollowerState v = FollowerState
     -- ^ Index and term of the last log entry in the node's log
   , fsTermAtAEPrevIndex :: Maybe Term
     -- ^ The term of the log entry specified in an AppendEntriesRPC
-  , fsFirstIndexStoredForTerm :: Maybe Index
+  , fsFirstIndexStoredForTerm :: Index
     -- ^ The index of the first log entry specified in the current term
   , fsClientReqCache :: ClientWriteReqCache
     -- ^ The client write request cache, growing linearly with the number of
