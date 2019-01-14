@@ -44,8 +44,7 @@ handleAppendEntries :: forall v sm. Show v => RPCHandler 'Follower sm (AppendEnt
 handleAppendEntries ns@(NodeFollowerState fs) sender ae@AppendEntries{..} = do
     PersistentState{..} <- get
 
-
-    let status = handleAppendEntries' currentTerm  fs ae
+    let status = handleAppendEntries' currentTerm fs ae
 
     newFollowerState <-
       if status == AERSuccess

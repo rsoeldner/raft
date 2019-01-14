@@ -299,8 +299,19 @@ handleEventLoop initRSM = do
                 Right (mEntry :: Maybe (Entry v)) -> put $
                   RaftNodeState $ NodeFollowerState fs
                     { fsTermAtAEPrevIndex = entryTerm <$> mEntry }
-            _ -> pure ()
+
+              -- this seems expensive
+              case fsLastLogEntry fs of
+                LastLogEntry e -> do
+                  v <- lift $ readFirstEntryInCurrentTerm (entryTerm e) (entryIndex e)
+                  put $
+                      RaftNodeState $ NodeFollowerState fs
+                        { fsFirstIndexStoredForTerm = entryIndex v }
+
+
+            _  -> pure ()
         _ -> pure ()
+
 
     -- Load the last log entry from a existing log
     setInitLastLogEntry :: RaftT v m ()

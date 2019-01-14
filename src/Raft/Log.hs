@@ -248,6 +248,21 @@ readEntries res =
         Right (Just e) -> pure (Right (OneEntry e))
     ByIndices interval -> fmap ManyEntries <$> readEntriesByIndices interval
 
+readFirstEntryInCurrentTerm
+  :: forall m v. (RaftReadLog m v, Exception (RaftReadLogError m))
+  => ReadEntriesSpec
+  -> m (Either (ReadEntriesError m) (ReadEntriesRes v))
+readFirstEntryInCurrentTerm currentTerm idx = do go undefined idx
+  where
+    go previous idx = do
+      Right (OneEntry e) <- readEntries (ByIndex idx)
+      if entryTerm e /= currentTerm
+        then pure previous
+        else go e (idx-1)
+
+
+
+
 -- | Read entries from the log between two indices
 readEntriesByIndices
   :: forall m v. (RaftReadLog m v, Exception (RaftReadLogError m))
@@ -268,3 +283,5 @@ readEntriesByIndices (IndexInterval l h) =
       | otherwise ->
           bimap ReadEntriesError (Seq.takeWhileL ((<= hidx) . entryIndex))
             <$> readLogEntriesFrom lidx
+
+
