@@ -219,7 +219,14 @@ setLastLogEntry nodeState entries =
       let lastLogEntry = LastLogEntry e
       case nodeState of
         NodeFollowerState fs ->
-          NodeFollowerState fs { fsLastLogEntry = lastLogEntry }
+          let LastLogEntry lastLastLogEntry = fsLastLogEntry fs
+          in NodeFollowerState fs
+            { fsLastLogEntry = lastLogEntry
+            , fsFirstIndexStoredForTerm =
+                if entryTerm lastLastLogEntry /= entryTerm e
+                  then entryIndex e
+                  else fsFirstIndexStoredForTerm fs
+            }
         NodeCandidateState cs ->
           NodeCandidateState cs { csLastLogEntry = lastLogEntry }
         NodeLeaderState ls ->
