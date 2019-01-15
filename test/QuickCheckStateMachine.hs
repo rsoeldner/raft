@@ -8,11 +8,12 @@
 module QuickCheckStateMachine where
 
 import           Control.Concurrent            (threadDelay)
+import           Control.Monad                 (forM, replicateM)
 import           Control.Exception             (bracket)
 import           Control.Monad.IO.Class        (liftIO)
 import           Data.Bifunctor                (bimap)
 import           Data.Char                     (isDigit)
-import           Data.List                     (isInfixOf, (\\))
+import           Data.List                     (isInfixOf, (\\), delete)
 import           Data.Maybe                    (isJust, isNothing)
 import qualified Data.Set                      as Set
 import           Data.TreeDiff                 (ToExpr)
@@ -23,7 +24,7 @@ import           System.IO                     (BufferMode (NoBuffering),
                                                 Handle, IOMode (WriteMode),
                                                 hClose, hGetLine, hPutStrLn,
                                                 hPutStrLn, hSetBuffering,
-                                                openFile)
+                                                openFile, hPrint)
 import           System.Process                (ProcessHandle, StdStream (CreatePipe, UseHandle),
                                                 callCommand, createProcess_,
                                                 getPid, getProcessExitCode, waitForProcess,
@@ -34,7 +35,7 @@ import           Test.QuickCheck               (Gen, Property, arbitrary,
                                                 elements, frequency,
                                                 noShrinking, shrink,
                                                 verboseCheck, withMaxSuccess,
-                                                (===))
+                                                (===), verbose, once)
 import           Test.QuickCheck.Monadic       (monadicIO)
 import           Test.StateMachine             (Concrete, GenSym, Logic (..),
                                                 Opaque (..), Reason (Ok),
@@ -42,13 +43,15 @@ import           Test.StateMachine             (Concrete, GenSym, Logic (..),
                                                 Symbolic, forAllCommands, notElem,
                                                 genSym, opaque, prettyCommands,
                                                 reference, runCommands, (.&&),
-                                                (.//), (.<), (.==), (.>=))
+                                                (.//), (.<), (.==), (.>=), Reason(..))
 import           Test.StateMachine.Types       (Command(..), Commands (..), Reference(..), Symbolic(..), Var(..))
 import qualified Test.StateMachine.Types.Rank2 as Rank2
 import           Text.Read                     (readEither)
 
 import qualified Data.Functor.Classes
 import           Debug.Trace                   (trace)
+
+import TestUtils
 
 ------------------------------------------------------------------------
 
@@ -68,6 +71,7 @@ type ProcessHandleRef r = Reference (Opaque ProcessHandle) r
 
 data Action (r :: * -> *)
   = SpawnNode Port Persistence
+  | SpawnNetwork Int
   | SpawnClient Port
   | KillNode (Port, ProcessHandleRef r)
   | Set (ClientHandleRefs r) Integer
@@ -79,6 +83,7 @@ data Action (r :: * -> *)
 
 data Response (r :: * -> *)
   = SpawnedNode (ProcessHandleRef r)
+  | SpawnedNetwork [(Port, ProcessHandleRef r)]
   | SpawnedClient (ClientHandleRefs r) (ProcessHandleRef r)
   | SpawnFailed Port
   | BrokeConnection
@@ -109,6 +114,8 @@ transition Model {..} act resp = case (act, resp) of
      in if length newNodes == 3
            then Model { nodes = newNodes, started = True, .. }
            else Model { nodes = newNodes, .. }
+  (SpawnNetwork nodeCount, SpawnedNetwork newNodes) -> Model { nodes = newNodes, started = True, .. }
+  (SpawnNetwork {}, SpawnFailed _)    -> Model {..}
   (SpawnNode {}, SpawnFailed _)    -> Model {..}
   (SpawnClient {}, SpawnedClient chrs cph) -> Model { client = Just (chrs, cph), .. }
   (SpawnClient {}, SpawnFailed _)  -> Model {..}
@@ -127,6 +134,7 @@ transition Model {..} act resp = case (act, resp) of
 precondition :: Model Symbolic -> Action Symbolic -> Logic
 precondition Model {..} act = case act of
   SpawnNode {}       -> length nodes .< 3
+  SpawnNetwork {}    -> Boolean (not started)
   SpawnClient {}     -> length nodes .== 3 .&& Boolean (isNothing client)
   KillNode  {}       -> length nodes .== 3
   Set _ i            -> length nodes .== 3 .&& i .>= 0
@@ -139,6 +147,8 @@ postcondition :: Model Concrete -> Action Concrete -> Response Concrete -> Logic
 postcondition Model {..} act resp = case (act, resp) of
   (Read _, Value (Right i))      -> Just i .== value
   (Read _, Value (Left e))       -> Bot .// e
+  (SpawnNetwork {}, SpawnedNetwork {}) -> Top
+  (SpawnNetwork {}, SpawnFailed {}) -> Bot .// "SpawnFailed - Network"
   (SpawnNode {}, SpawnedNode {}) -> Top
   (SpawnNode {}, SpawnFailed {}) -> Bot .// "SpawnFailed - Node"
   (SpawnClient {}, SpawnedClient {}) -> Top
@@ -221,8 +231,32 @@ semantics h (SpawnNode port1 p) = do
   case mec of
     Nothing -> return (SpawnedNode (reference (Opaque ph)))
     Just ec -> do
-      hPutStrLn h (show ec)
+      hPrint h ec
       return (SpawnFailed port1)
+
+semantics h (SpawnNetwork nodeCount) = do
+  ports <- replicateM nodeCount getRandomOpenPort
+  res <- forM ports $ \port -> do
+      hPutStrLn h ("Spawning node on port " ++ show port)
+      removePathForcibly ("/tmp/raft-log-" ++ show port ++ ".txt")
+      h' <- openFile ("/tmp/raft-log-" ++ show port ++ ".txt") WriteMode
+      let otherNodes = fmap ( ("localhost:" ++) . show) (delete port ports)
+      (_, _, _, ph) <- createProcess_ "raft node"
+        (proc "fiu-run" ([ "-x", "stack", "exec", "raft-example", "node"
+                        , "fresh"
+
+                        ] ++ otherNodes ))
+          { std_out = UseHandle h'
+          , std_err = UseHandle h'
+          }
+      --threadDelay 1500000
+      pure $ (port, (reference (Opaque ph)))
+
+  return $ SpawnedNetwork $ res
+
+
+
+
 
 semantics h (SpawnClient cport) = do
   hPutStrLn h "Spawning client"
@@ -233,7 +267,7 @@ semantics h (SpawnClient cport) = do
      , std_err = CreatePipe
      }
 
-  threadDelay 1000000
+  --threadDelay 1000000
   mec <- getProcessExitCode ph
   case mec of
     Just ec -> do
@@ -352,7 +386,7 @@ sm h = StateMachine initModel transition precondition postcondition
                Nothing generator Nothing shrinker (semantics h) mock
 
 prop_sequential :: Property
-prop_sequential = withMaxSuccess 10 $ noShrinking $
+prop_sequential =verbose .  withMaxSuccess 10 $ noShrinking $
   forAllCommands (sm undefined) (Just 20) $ \cmds -> monadicIO $ do
     h <- liftIO setup
     let sm' = sm h
@@ -367,6 +401,25 @@ prop_sequential = withMaxSuccess 10 $ noShrinking $
       Just (ClientHandleRefs chin chout, cph) -> do
         liftIO (terminateProcess (opaque cph))
         liftIO (hClose (opaque chin) >> hClose (opaque chout))
+
+--prop_precondition :: Property
+--prop_precondition = once $ monadicIO $ do
+  --h <- liftIO setup
+  --let sm' = sm h
+  --(hist, model, res) <- runCommands sm' cmds
+  --prettyCommands sm' hist (res === Ok)
+  --liftIO (hClose h)
+  ---- Terminate node processes
+  --liftIO (mapM_ (terminateProcess . opaque . snd) (nodes model))
+  ---- Terminate client process
+  --case client model of
+    --Nothing -> pure ()
+    --Just (ClientHandleRefs chin chout, cph) -> do
+      --liftIO (terminateProcess (opaque cph))
+      --liftIO (hClose (opaque chin) >> hClose (opaque chout))
+    --where
+      --cmds = Commands []
+        ----[ Types.Command (Read (Reference (Symbolic (Var 0)))) (ReadValue 0) [] ]
 
 ------------------------------------------------------------------------
 
@@ -385,12 +438,16 @@ runMany cmds log = monadicIO $ do
 
 -------------------------------------------------------------------------------
 
--- unit_exampleUnit :: IO ()
--- unit_exampleUnit = bracket setup hClose (verboseCheck . exampleUnit)
---
--- exampleUnit :: Handle -> Property
--- exampleUnit = runMany cmds
---   where
---     cmds = Commands
---       [ -- Commands go here...
---       ]
+unit_exampleUnit :: IO ()
+unit_exampleUnit = bracket setup hClose (verboseCheck . exampleUnit)
+
+exampleUnit :: Handle -> Property
+exampleUnit = once . runMany cmds
+  where
+    cmds = Commands
+      [ -- Commands go here...
+       Command (SpawnNetwork 50) (Set.fromList [ Var 0 ])
+
+      ]
+
+

@@ -11,7 +11,7 @@ module Raft.NodeState where
 import Protolude
 
 import qualified Data.Serialize as S
-import Data.Sequence (Seq(..))
+import Data.Sequence (Seq(..), takeWhileL)
 
 import Raft.Client
 import Raft.Log
@@ -211,8 +211,11 @@ data LeaderState v = LeaderState
 --------------------------------------------------------------------------------
 
 -- | Update the last log entry in the node's log
+-- and
 setLastLogEntryAndFirstIndexStoredForTerm :: NodeState s v -> Entries v -> NodeState s v
 setLastLogEntryAndFirstIndexStoredForTerm nodeState entries =
+
+  --let fsFirstIndexStoredForTerm = takeWhileL (\x -> (entryTerm x) /= lastLogEntryTerm(fsLastLogEntry fs))  entries in
   case entries of
     Empty -> nodeState
     _ :|> e -> do

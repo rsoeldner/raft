@@ -6,7 +6,7 @@ module TestUtils where
 import Protolude
 import qualified Data.Set as Set
 import qualified Data.Map.Merge.Lazy as Merge
-
+import Network.Socket
 import Raft
 
 isRaftLeader :: RaftNodeState v -> Bool
@@ -90,3 +90,12 @@ printIfNodes :: (Show nId, Eq nId) => [nId] -> nId -> [Char] -> IO ()
 printIfNodes nIds nId' msg =
   when (nId' `elem` nIds) $
     print $ show nId' ++ " " ++ msg
+getRandomOpenPort :: IO Int
+getRandomOpenPort = do
+  addr:_ <- getAddrInfo Nothing (Just "localhost") Nothing
+  sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+  bind sock (addrAddress addr)
+  SockAddrInet (PortNum port) _ <- getSocketName sock
+  close sock
+  return $ fromIntegral port
+

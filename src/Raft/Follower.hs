@@ -9,7 +9,7 @@
 
 module Raft.Follower (
     handleAppendEntries
-  , shouldApplyAppendEntries'
+  , shouldApplyAppendEntries
   , handleAppendEntriesResponse
   , handleRequestVote
   , handleRequestVoteResponse
