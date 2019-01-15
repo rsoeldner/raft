@@ -211,8 +211,8 @@ data LeaderState v = LeaderState
 --------------------------------------------------------------------------------
 
 -- | Update the last log entry in the node's log
-setLastLogEntry :: NodeState s v -> Entries v -> NodeState s v
-setLastLogEntry nodeState entries =
+setLastLogEntryAndFirstIndexStoredForTerm :: NodeState s v -> Entries v -> NodeState s v
+setLastLogEntryAndFirstIndexStoredForTerm nodeState entries =
   case entries of
     Empty -> nodeState
     _ :|> e -> do

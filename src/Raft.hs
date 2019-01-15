@@ -74,7 +74,7 @@ module Raft
   , isFollower
   , isCandidate
   , isLeader
-  , setLastLogEntry
+  , setLastLogEntryAndFirstIndexStoredForTerm
   , getLastLogEntry
   , getLastAppliedAndCommitIndex
 
@@ -312,7 +312,7 @@ handleEventLoop initRSM = do
         Left err -> throw err
         Right Nothing -> pure ()
         Right (Just e) ->
-          put (RaftNodeState (setLastLogEntry rns (singleton e)))
+          put (RaftNodeState (setLastLogEntryAndFirstIndexStoredForTerm rns (singleton e)))
 
 handleActions
   :: ( Show v, Show sm, Show (Action sm v), Show (RaftLogError m), Typeable m
@@ -368,7 +368,7 @@ handleAction nodeConfig action = do
         Right _ -> do
           -- Update the last log entry data
           modify $ \(RaftNodeState ns) ->
-            RaftNodeState (setLastLogEntry ns entries)
+            RaftNodeState (setLastLogEntryAndFirstIndexStoredForTerm ns entries)
     UpdateClientReqCacheFrom idx -> do
       RaftNodeState ns <- get
       case ns of
