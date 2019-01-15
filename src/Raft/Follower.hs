@@ -9,7 +9,7 @@
 
 module Raft.Follower (
     handleAppendEntries
-  , handleAppendEntries'
+  , shouldApplyAppendEntries'
   , handleAppendEntriesResponse
   , handleRequestVote
   , handleRequestVoteResponse
@@ -43,8 +43,7 @@ import Raft.Types
 handleAppendEntries :: forall v sm. Show v => RPCHandler 'Follower sm (AppendEntries v) v
 handleAppendEntries ns@(NodeFollowerState fs) sender ae@AppendEntries{..} = do
     PersistentState{..} <- get
-
-    let status = handleAppendEntries' currentTerm fs ae
+    let status = shouldApplyAppendEntries currentTerm fs ae
 
     newFollowerState <-
       if status == AERSuccess
@@ -82,8 +81,9 @@ handleAppendEntries ns@(NodeFollowerState fs) sender ae@AppendEntries{..} = do
     updateLeader :: FollowerState v -> FollowerState v
     updateLeader followerState = followerState { fsCurrentLeader = CurrentLeader (LeaderId sender) }
 
-handleAppendEntries' :: Term -> FollowerState v -> AppendEntries v -> AppendEntriesResponseStatus
-handleAppendEntries' currentTerm fs AppendEntries{..} =
+-- | Decide if entries given can be applied
+shouldApplyAppendEntries :: Term -> FollowerState v -> AppendEntries v -> AppendEntriesResponseStatus
+shouldApplyAppendEntries currentTerm fs AppendEntries{..} =
   if aeTerm < currentTerm
     -- 1. Reply false if term < currentTerm
     then AERStaleTerm
@@ -93,23 +93,21 @@ handleAppendEntries' currentTerm fs AppendEntries{..} =
           -- there are no previous entries
           | aePrevLogIndex == index0 -> AERSuccess
           -- the follower doesn't have the previous index given in the AppendEntriesRPC
-          | otherwise -> AERInconsistent {
-                  aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
-                }
+          | otherwise -> AERInconsistent
+              { aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs }
         Just entryAtAEPrevLogIndexTerm ->
           -- 2. Reply false if log doesn't contain an entry at
           -- prevLogIndex whose term matches prevLogTerm.
           if entryAtAEPrevLogIndexTerm /= aePrevLogTerm
-            then AERInconsistent {
-                  aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs
-                }
+            then AERInconsistent
+              { aerFirstIndexStoredForTerm = fsFirstIndexStoredForTerm fs }
             else AERSuccess
               -- 3. If an existing entry conflicts with a new one (same index
               -- but different terms), delete the existing entry and all that
               -- follow it.
               --   &
               -- 4. Append any new entries not already in the log
-              -- (`appendLogEntries aeEntries` accomplishes 3 & 4)
+              -- (`appendLogEntries aeEntries` accomplishes 3 & 4 see above in handleAppendEntries )
               -- 5. If leaderCommit > commitIndex, set commitIndex =
               -- min(leaderCommit, index of last new entry)
 
