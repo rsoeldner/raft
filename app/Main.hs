@@ -302,5 +302,5 @@ main = do
     -- Tab Completion: return a completion for partial words entered
     completer :: Monad m => WordCompleter m
     completer n = do
-      let cmds = ["addNode <host:port>", "getNodes", "incr <var>", "set <var> <val>"]
+      let cmds = ["addNode <host:port>", "getNodes", "incr <var>", "set <var> <val>", "read"]
       return $ filter (isPrefixOf n) cmds

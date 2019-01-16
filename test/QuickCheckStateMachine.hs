@@ -99,19 +99,20 @@ data Model (r :: * -> *) = Model
   , started  :: Bool
   , value    :: Maybe Integer
   , isolated :: [(Port, ProcessHandleRef r)]
+  , nodeCount :: Int
   }
   deriving (Show, Generic)
 
 deriving instance ToExpr (Model Concrete)
 
 initModel :: Model r
-initModel = Model [] Nothing False Nothing []
+initModel = Model [] Nothing False Nothing [] 3
 
 transition :: Data.Functor.Classes.Show1 r => Model r -> Action r -> Response r -> Model r
 transition Model {..} act resp = case (act, resp) of
   (SpawnNode port _, SpawnedNode ph) ->
     let newNodes = nodes ++ [(port, ph)]
-     in if length newNodes == 3
+     in if length newNodes == nodeCount
            then Model { nodes = newNodes, started = True, .. }
            else Model { nodes = newNodes, .. }
   (SpawnNetwork nodeCount, SpawnedNetwork newNodes) -> Model { nodes = newNodes, started = True, .. }
@@ -133,15 +134,15 @@ transition Model {..} act resp = case (act, resp) of
 -- TODO I don't think the precondition is being checked...
 precondition :: Model Symbolic -> Action Symbolic -> Logic
 precondition Model {..} act = case act of
-  SpawnNode {}       -> length nodes .< 3
+  SpawnNode {}       -> length nodes .< nodeCount
   SpawnNetwork {}    -> Boolean (not started)
-  SpawnClient {}     -> length nodes .== 3 .&& Boolean (isNothing client)
-  KillNode  {}       -> length nodes .== 3
-  Set _ i            -> length nodes .== 3 .&& i .>= 0
-  Read _             -> length nodes .== 3 .&& Boolean (isJust value)
-  Incr _             -> length nodes .== 3 .&& Boolean (isJust value)
-  BreakConnection (port, _) -> length nodes .== 3 .&& port `notElem` map fst isolated
-  FixConnection   {} -> length nodes .== 3 .&& Boolean (not (null isolated))
+  SpawnClient {}     -> length nodes .== nodeCount .&& Boolean (isNothing client)
+  KillNode  {}       -> length nodes .== nodeCount
+  Set _ i            -> length nodes .== nodeCount .&& i .>= 0
+  Read _             -> length nodes .== nodeCount .&& Boolean (isJust value)
+  Incr _             -> length nodes .== nodeCount .&& Boolean (isJust value)
+  BreakConnection (port, _) -> length nodes .== nodeCount .&& port `notElem` map fst isolated
+  FixConnection   {} -> length nodes .== nodeCount .&& Boolean (not (null isolated))
 
 postcondition :: Model Concrete -> Action Concrete -> Response Concrete -> Logic
 postcondition Model {..} act resp = case (act, resp) of
@@ -236,7 +237,8 @@ semantics h (SpawnNode port1 p) = do
 
 semantics h (SpawnNetwork nodeCount) = do
   ports <- replicateM nodeCount getRandomOpenPort
-  res <- forM ports $ \port -> do
+  -- always run a node on port 3000 for the client to connect to
+  res <- forM (3000 : ports) $ \port -> do
       hPutStrLn h ("Spawning node on port " ++ show port)
       removePathForcibly ("/tmp/raft-log-" ++ show port ++ ".txt")
       h' <- openFile ("/tmp/raft-log-" ++ show port ++ ".txt") WriteMode
@@ -244,21 +246,17 @@ semantics h (SpawnNetwork nodeCount) = do
       (_, _, _, ph) <- createProcess_ "raft node"
         (proc "fiu-run" ([ "-x", "stack", "exec", "raft-example", "node"
                         , "fresh"
-
                         ] ++ otherNodes ))
           { std_out = UseHandle h'
           , std_err = UseHandle h'
           }
-      --threadDelay 1500000
-      pure $ (port, (reference (Opaque ph)))
-
-  return $ SpawnedNetwork $ res
-
+      pure (port, reference (Opaque ph))
+  threadDelay 1500000
+  return $ SpawnedNetwork res
 
 
 
-
-semantics h (SpawnClient cport) = do
+semantics h (SpawnClient port) = do
   hPutStrLn h "Spawning client"
   (Just hin, Just hout, _, ph) <- createProcess_ "raft client"
     (proc "stack" [ "exec", "raft-example", "client" ])
@@ -267,19 +265,17 @@ semantics h (SpawnClient cport) = do
      , std_err = CreatePipe
      }
 
-  --threadDelay 1000000
+  threadDelay 1000000
   mec <- getProcessExitCode ph
   case mec of
     Just ec -> do
-      hPutStrLn h (show ec)
-      return (SpawnFailed cport)
+      hPrint h ec
+      return (SpawnFailed port)
     Nothing -> do
       threadDelay 100000
       hSetBuffering hin  NoBuffering
       hSetBuffering hout NoBuffering
-      hPutStrLn hin "addNode localhost:3000"
-      hPutStrLn hin "addNode localhost:3001"
-      hPutStrLn hin "addNode localhost:3002"
+      hPutStrLn hin ("addNode localhost:" ++ show port)
       let refClient_hin = reference (Opaque hin)
           refClient_hout = reference (Opaque hout)
           clientHandleRefs = ClientHandleRefs refClient_hin refClient_hout
@@ -329,13 +325,13 @@ semantics h (FixConnection (port, ph)) = do
 
 generator :: Model Symbolic -> Gen (Action Symbolic)
 generator Model {..}
-  | length nodes < 3  =
+  | length nodes < nodeCount  =
       if started
-        then flip SpawnNode Existing <$> elements ([3000..3002] \\ map fst nodes)
-        else flip SpawnNode Fresh <$> elements ([3000..3002] \\ map fst nodes)
+        then flip SpawnNode Existing <$> elements ([3000..4000] \\ map fst nodes)
+        else flip SpawnNode Fresh <$> elements ([3000..4000] \\ map fst nodes)
   | otherwise        =
       case client of
-        Nothing -> SpawnClient <$> elements [3003..3010]
+        Nothing -> SpawnClient <$> elements (map fst nodes)
         Just (chs, _) ->
           case value of
             Nothing -> Set chs <$> arbitrary
@@ -438,16 +434,16 @@ runMany cmds log = monadicIO $ do
 
 -------------------------------------------------------------------------------
 
-unit_exampleUnit :: IO ()
-unit_exampleUnit = bracket setup hClose (verboseCheck . exampleUnit)
+--unit_exampleUnit :: IO ()
+--unit_exampleUnit = bracket setup hClose (verboseCheck . exampleUnit)
 
-exampleUnit :: Handle -> Property
-exampleUnit = once . runMany cmds
-  where
-    cmds = Commands
-      [ -- Commands go here...
-       Command (SpawnNetwork 50) (Set.fromList [ Var 0 ])
+--exampleUnit :: Handle -> Property
+--exampleUnit = once . runMany cmds
+  --where
+    --cmds = Commands
+      --[ -- Commands go here...
+       --Command (SpawnNetwork 10) (Set.fromList [ Var 0 ])
 
-      ]
+      --]
 
 
