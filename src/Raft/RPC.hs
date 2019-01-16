@@ -122,7 +122,6 @@ data AppendEntriesResponseStatus
     }
   deriving (Eq, Show, Generic, Serialize)
 
-
 -- | Representation of the message sent by candidates to their peers to request
 -- their vote
 data RequestVote = RequestVote

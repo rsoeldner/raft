@@ -177,18 +177,17 @@ command h chs@ClientHandleRefs{..} cmd = go 3 0
           Nothing   -> do
             hPutStrLn h "'getResponse' timed out"
             pure (Just (unex, Nothing))
-          Just resp ->
-            if "Timeout" `isInfixOf` resp
-            then do
-              hPutStrLn h ("Command timed out, retrying: " ++ show resp)
-              pure (Just (unex, Nothing))
-            else if "Unexpected" `isInfixOf` resp
-              then do
-                hPutStrLn h ("Unexpected read/write response, retrying: " ++ show resp)
-                pure (Just (unex + 1, Nothing))
-              else do
-                hPutStrLn h ("got response `" ++ resp ++ "'")
-                pure (Just (unex, Just resp))
+          Just resp
+            | "Timeout" `isInfixOf` resp ->
+              do hPutStrLn h ("Command timed out, retrying: " ++ show resp)
+                 pure (Just (unex, Nothing))
+            | "Unexpected" `isInfixOf` resp ->
+              do hPutStrLn h
+                   ("Unexpected read/write response, retrying: " ++ show resp)
+                 pure (Just (unex + 1, Nothing))
+            | otherwise ->
+              do hPutStrLn h ("got response `" ++ resp ++ "'")
+                 pure (Just (unex, Just resp))
       case eRes of
         Nothing -> pure (unex, Nothing)
         -- Recurse if command successful
@@ -205,25 +204,19 @@ command h chs@ClientHandleRefs{..} cmd = go 3 0
           | otherwise -> return (Just line)
 
 semantics :: Handle -> Action Concrete -> IO (Response Concrete)
-semantics h (SpawnNode port1 p) = do
-  hPutStrLn h ("Spawning node on port " ++ show port1)
-  removePathForcibly ("/tmp/raft-log-" ++ show port1 ++ ".txt")
-  h' <- openFile ("/tmp/raft-log-" ++ show port1 ++ ".txt") WriteMode
-  let port2, port3 :: Int
-      (port2, port3) = case port1 of
-        3000 -> (3001, 3002)
-        3001 -> (3000, 3002)
-        3002 -> (3000, 3001)
-        _    -> error "semantics: invalid port1"
+semantics h (SpawnNode port p) = do
+  hPutStrLn h ("Spawning node on port " ++ show port)
+  removePathForcibly ("/tmp/raft-log-" ++ show port ++ ".txt")
+  h' <- openFile ("/tmp/raft-log-" ++ show port ++ ".txt") WriteMode
+
   let persistence Fresh    = "fresh"
       persistence Existing = "existing"
+
+  let otherNodes = fmap ( ("localhost:" ++) . show) (delete port [3000..3050])
   (_, _, _, ph) <- createProcess_ "raft node"
-    (proc "fiu-run" [ "-x", "stack", "exec", "raft-example", "node"
+    (proc "fiu-run" ([ "-x", "stack", "exec", "raft-example", "node"
                     , persistence p
-                    , "localhost:" ++ show port1
-                    , "localhost:" ++ show port2
-                    , "localhost:" ++ show port3
-                    ])
+                    ] ++ otherNodes) )
       { std_out = UseHandle h'
       , std_err = UseHandle h'
       }
@@ -233,7 +226,7 @@ semantics h (SpawnNode port1 p) = do
     Nothing -> return (SpawnedNode (reference (Opaque ph)))
     Just ec -> do
       hPrint h ec
-      return (SpawnFailed port1)
+      return (SpawnFailed port)
 
 semantics h (SpawnNetwork nodeCount) = do
   ports <- replicateM nodeCount getRandomOpenPort
@@ -253,8 +246,6 @@ semantics h (SpawnNetwork nodeCount) = do
       pure (port, reference (Opaque ph))
   threadDelay 1500000
   return $ SpawnedNetwork res
-
-
 
 semantics h (SpawnClient port) = do
   hPutStrLn h "Spawning client"
@@ -300,8 +291,7 @@ semantics h (Read chs) = do
       let parse = readEither
                 . takeWhile isDigit
                 . drop 1
-                . snd
-                . break (== ',')
+                . dropWhile (/= ',')
       return (Value (bimap (++ (": " ++ resp)) id (parse resp)))
 semantics h (Incr chs) = do
   (_, mresp) <- command h chs "incr x"
@@ -327,8 +317,8 @@ generator :: Model Symbolic -> Gen (Action Symbolic)
 generator Model {..}
   | length nodes < nodeCount  =
       if started
-        then flip SpawnNode Existing <$> elements ([3000..4000] \\ map fst nodes)
-        else flip SpawnNode Fresh <$> elements ([3000..4000] \\ map fst nodes)
+        then flip SpawnNode Existing <$> elements ([3000..3000+nodeCount] \\ map fst nodes)
+        else flip SpawnNode Fresh <$> elements ([3000..3000+nodeCount] \\ map fst nodes)
   | otherwise        =
       case client of
         Nothing -> SpawnClient <$> elements (map fst nodes)
@@ -382,7 +372,7 @@ sm h = StateMachine initModel transition precondition postcondition
                Nothing generator Nothing shrinker (semantics h) mock
 
 prop_sequential :: Property
-prop_sequential =verbose .  withMaxSuccess 10 $ noShrinking $
+prop_sequential =verbose .  withMaxSuccess 1 $ noShrinking $
   forAllCommands (sm undefined) (Just 20) $ \cmds -> monadicIO $ do
     h <- liftIO setup
     let sm' = sm h
@@ -446,4 +436,5 @@ runMany cmds log = monadicIO $ do
 
       --]
 
-
+--otherNodes :: Int -> String
+--otherNodes nodeCount = concatMap (("localhost:" ++) . show ) [3000..nodeCount]

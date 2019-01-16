@@ -43,15 +43,15 @@ import Raft.Types
 handleAppendEntries :: forall v sm. Show v => RPCHandler 'Follower sm (AppendEntries v) v
 handleAppendEntries ns@(NodeFollowerState fs) sender ae@AppendEntries{..} = do
     PersistentState{..} <- get
-    let status = shouldApplyAppendEntries currentTerm fs ae
 
+    let status = shouldApplyAppendEntries currentTerm fs ae
     newFollowerState <-
-      if status == AERSuccess
-        then do
+      case status of
+        AERSuccess -> do
           appendLogEntries aeEntries
           resetElectionTimeout
           pure $ updateFollowerState fs
-        else pure fs
+        _ -> pure fs
 
     send (unLeaderId aeLeaderId) $
       SendAppendEntriesResponseRPC
