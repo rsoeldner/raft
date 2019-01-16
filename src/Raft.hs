@@ -372,6 +372,13 @@ handleAction nodeConfig action = do
           -- Update the last log entry data
           modify $ \(RaftNodeState ns) ->
             RaftNodeState (setLastLogEntry ns entries)
+    -- TODO Maybe this should be called 'UpdateClientReqCacheTo`, since the
+    -- leader should only respond to the clien requests _up to_ the last commit
+    -- index, not _from_ the last commit index onwards... As soon as we start
+    -- testing with multiple clients, this will be incorrect. Instead, for each
+    -- entry between the previous commit index (before the leader updated it)
+    -- and the current commit index, the client issuer of that entry (if there
+    -- is one) should be responded to.
     UpdateClientReqCacheFrom idx -> do
       RaftNodeState ns <- get
       case ns of

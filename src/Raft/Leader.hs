@@ -56,11 +56,12 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
   | otherwise = do
-      case aerReadRequest appendEntriesResp of
-        Nothing -> leaderResultState Noop <$> do
-          let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
-              newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
-              newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
+      case aerData appendEntriesResp of
+        AERLastReceivedEntryIndex idx -> leaderResultState Noop <$> do
+          -- On successful AE RPC, update the nextIndex of the follower to be
+          -- the last log the follower has received.
+          let newNextIndices = Map.insert sender (idx + 1) (lsNextIndex ls)
+              newMatchIndices = Map.insert sender idx (lsMatchIndex ls)
               lsUpdatedIndices = ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }
           -- Increment leader commit index if now a majority of followers have
           -- replicated an entry at a given term.
@@ -68,7 +69,7 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
           when (lsCommitIndex lsUpdatedCommitIdx > lsCommitIndex lsUpdatedIndices) $
             updateClientReqCacheFromIdx (lsCommitIndex lsUpdatedIndices)
           pure lsUpdatedCommitIdx
-        Just n -> handleReadReq n ls
+        AERReadReqNum n -> handleReadReq n ls
   where
     handleReadReq :: Int -> LeaderState v -> TransitionM sm v (ResultState 'Leader v)
     handleReadReq n leaderState = do

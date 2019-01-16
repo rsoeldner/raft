@@ -75,15 +75,23 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
         AppendEntriesResponse
           { aerTerm = currentTerm
           , aerSuccess = success
-          , aerReadRequest = aeReadRequest
+          , aerData = mkAERData (fsCommitIndex newFollowerState)
           }
     pure (followerResultState Noop newFollowerState)
   where
+    mkAERData commitIdx =
+      case aeReadRequest of
+        Nothing ->
+          case aeEntries of
+            Empty -> AERLastReceivedEntryIndex commitIdx
+            _ :|> e -> AERLastReceivedEntryIndex (entryIndex e)
+        Just n -> AERReadReqNum n
+
     updateFollowerState :: FollowerState v -> FollowerState v
     updateFollowerState fs =
       if aeLeaderCommit > fsCommitIndex fs
-        then updateLeader (updateCommitIndex fs)
-        else updateLeader fs
+        then updateCurrentLeader (updateCommitIndex fs)
+        else updateCurrentLeader fs
 
     updateCommitIndex :: FollowerState v -> FollowerState v
     updateCommitIndex followerState =
@@ -94,8 +102,9 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
           let newCommitIndex = min aeLeaderCommit (entryIndex e)
           in followerState { fsCommitIndex = newCommitIndex }
 
-    updateLeader :: FollowerState v -> FollowerState v
-    updateLeader followerState = followerState { fsCurrentLeader = CurrentLeader (LeaderId sender) }
+    updateCurrentLeader :: FollowerState v -> FollowerState v
+    updateCurrentLeader followerState =
+      followerState { fsCurrentLeader = CurrentLeader (LeaderId sender) }
 
 -- | Followers should not respond to 'AppendEntriesResponse' messages.
 handleAppendEntriesResponse :: RPCHandler 'Follower sm AppendEntriesResponse v

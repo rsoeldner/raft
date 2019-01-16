@@ -99,13 +99,18 @@ data AppendEntries v = AppendEntries
     -- ^ which read request the message corresponds to
   } deriving (Show, Generic, Serialize)
 
+data AERData
+  = AERReadReqNum Int
+  | AERLastReceivedEntryIndex Index
+  deriving (Show, Generic, Serialize)
+
 -- | Representation of the response from a follower to an AppendEntries message
 data AppendEntriesResponse = AppendEntriesResponse
   { aerTerm :: Term
     -- ^ current term for leader to update itself
   , aerSuccess :: Bool
     -- ^ true if follower contained entry matching aePrevLogIndex and aePrevLogTerm
-  , aerReadRequest :: Maybe Int
+  , aerData :: AERData
     -- ^ which read request the response corresponds to
   } deriving (Show, Generic, Serialize)
 
