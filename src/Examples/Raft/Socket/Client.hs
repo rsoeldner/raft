@@ -84,7 +84,7 @@ instance (S.Serialize v, MonadIO m) => RaftClientSend (RaftClientRespChanT s v m
         -- may have been closed by the running process
         N.connect host port $ \(sock, sockAddr) ->
           N.send sock (S.encode (ClientRequestEvent creq))
-    let errPrefix = "Failed to send ClientWriteReq: "
+    let errPrefix = "Failed to send client request: "
     case mRes of
       Nothing -> pure (Left (errPrefix <> "'connect' timed out"))
       Just (Left (err :: SomeException)) -> pure $ Left (errPrefix <> show err)
@@ -107,7 +107,7 @@ runRaftSocketClientM
   -> RaftSocketClientM s v a
   -> IO a
 runRaftSocketClientM cid nids respChan rscm = do
-  raftClientState <- initRaftClientState <$> liftIO newStdGen
+  raftClientState <- initRaftClientState nids <$> liftIO newStdGen
   let raftClientEnv = RaftClientEnv cid
   flip runReaderT respChan
     . unRaftClientRespChanT
@@ -122,7 +122,7 @@ clientResponseServer
 clientResponseServer host port = do
   respChan <- asks clientRespChan
   N.serve (N.Host host) port $ \(sock, _) -> do
-    mBytes <- N.recv sock (4 * 4096)
+    mBytes <- recvAll sock maxMsgSize
     case mBytes of
       Nothing -> putText "Socket was closed on the other end"
       Just bytes -> case S.decode bytes of
