@@ -43,6 +43,9 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
           ((ResultState _ resultState, logMsgs'), persistentState'', outputs') ->
             (RaftNodeState resultState, persistentState'', outputs <> outputs', logMsgs <> logMsgs')
   where
+    -- Instead of duplicating these RPC term checks in literally every handler
+    -- for every node mode, we do a pre-check and demote the node to follower if
+    -- the rpcTerm is > the current node term.
     handleNewerRPCTerm :: ((RaftNodeState v, [LogMsg]), PersistentState, [Action sm v])
     handleNewerRPCTerm =
       case event of
@@ -52,24 +55,26 @@ handleEvent raftNodeState@(RaftNodeState initNodeState) transitionEnv persistent
             -- currentTerm = T, convert to follower
             currentTerm <- gets currentTerm
             if (currentTerm < rpcTerm rpc) ||
-               (currentTerm == rpcTerm rpc && isCandidate initNodeState)
+               (currentTerm == rpcTerm rpc && isCandidate initNodeState && isAppendEntriesRPC rpc)
                -- ^ While waiting for votes, a candidate may receive an
                -- AppendEntries RPC from another server claiming to be
                -- leader. If the leader’s term (included in its RPC) is at least
                -- as large as the candidate’s current term, then the candidate
                -- recognizes the leader as legitimate and returns to follower
                -- state.
-              then
-                case convertToFollower initNodeState of
-                  ResultState _ nodeState -> do
-                    modify $ \pstate ->
-                      pstate { currentTerm = rpcTerm rpc
-                             , votedFor = Nothing
-                             }
-                    resetElectionTimeout
-                    pure (RaftNodeState nodeState)
+              then mkNewRaftNodeState rpc
               else pure raftNodeState
         _ -> ((raftNodeState, []), persistentState, mempty)
+
+    mkNewRaftNodeState rpc =
+      case convertToFollower initNodeState of
+        ResultState _ nodeState -> do
+          modify $ \pstate ->
+            pstate { currentTerm = rpcTerm rpc
+                   , votedFor = Nothing
+                   }
+          resetElectionTimeout
+          pure (RaftNodeState nodeState)
 
     convertToFollower :: forall s. NodeState s v -> ResultState s v
     convertToFollower nodeState =
