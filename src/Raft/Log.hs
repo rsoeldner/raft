@@ -144,51 +144,41 @@ clientReqData = go mempty
             LeaderIssuer _ -> go acc rest
             ClientIssuer cid sn -> go (Map.insert cid (sn, entryIndex e) acc) rest
 
+type RaftLogException e = (Show e, Exception e)
+
 -- | Provides an interface to initialize a fresh log entry storage
 class RaftInitLog m v where
   type RaftInitLogError m
   initializeLog :: Proxy v -> m (Either (RaftInitLogError m) ())
 
 -- | Provides an interface for nodes to write log entries to storage.
-class (Show (RaftWriteLogError m), Monad m) => RaftWriteLog m v where
+class (RaftLogException (RaftWriteLogError m), Monad m) => RaftWriteLog m v where
   type RaftWriteLogError m
   -- | Write the given log entries to storage
-  writeLogEntries
-    :: Exception (RaftWriteLogError m)
-    => Entries v -> m (Either (RaftWriteLogError m) ())
+  writeLogEntries :: Entries v -> m (Either (RaftWriteLogError m) ())
 
 data DeleteSuccess v = DeleteSuccess
 
 -- | Provides an interface for nodes to delete log entries from storage.
-class (Show (RaftDeleteLogError m), Monad m) => RaftDeleteLog m v where
+class (RaftLogException (RaftDeleteLogError m), Monad m) => RaftDeleteLog m v where
   type RaftDeleteLogError m
   -- | Delete log entries from a given index; e.g. 'deleteLogEntriesFrom 7'
   -- should delete every log entry with an index >= 7.
-  deleteLogEntriesFrom
-    :: Exception (RaftDeleteLogError m)
-    => Index -> m (Either (RaftDeleteLogError m) (DeleteSuccess v))
+  deleteLogEntriesFrom :: Index -> m (Either (RaftDeleteLogError m) (DeleteSuccess v))
 
 -- | Provides an interface for nodes to read log entries from storage.
-class (Show (RaftReadLogError m), Monad m) => RaftReadLog m v where
+class (RaftLogException (RaftReadLogError m), Monad m) => RaftReadLog m v where
   type RaftReadLogError m
   -- | Read the log at a given index
-  readLogEntry
-    :: Exception (RaftReadLogError m)
-    => Index -> m (Either (RaftReadLogError m) (Maybe (Entry v)))
-  -- | Read log entries from a specific index onwards, including the specific
-  -- index
-  readLogEntriesFrom
-    :: Exception (RaftReadLogError m)
-    => Index -> m (Either (RaftReadLogError m) (Entries v))
+  readLogEntry :: Index -> m (Either (RaftReadLogError m) (Maybe (Entry v)))
+  -- | Read log entries from a specific index onwards, including the specific index
+  readLogEntriesFrom :: Index -> m (Either (RaftReadLogError m) (Entries v))
+  -- | Read log entries by a specific field
+  readLogEntriesBy :: ReadEntriesSpec -> m (Either (RaftReadLogError m) (ReadEntriesRes v))
   -- | Read the last log entry in the log
-  readLastLogEntry
-    :: Exception (RaftReadLogError m)
-    => m (Either (RaftReadLogError m) (Maybe (Entry v)))
+  readLastLogEntry :: m (Either (RaftReadLogError m) (Maybe (Entry v)))
 
-  default readLogEntriesFrom
-    :: Exception (RaftReadLogError m)
-    => Index
-    -> m (Either (RaftReadLogError m) (Entries v))
+  default readLogEntriesFrom :: Index -> m (Either (RaftReadLogError m) (Entries v))
   readLogEntriesFrom idx = do
       eLastLogEntry <- readLastLogEntry
       case eLastLogEntry of
@@ -257,6 +247,8 @@ data IndexInterval = IndexInterval (Maybe Index) (Maybe Index)
 data ReadEntriesSpec
   = ByIndex Index
   | ByIndices IndexInterval
+  | ByHash EntryHash
+  | ByHashes (Set EntryHash)
   deriving (Show, Generic, Serialize)
 
 data ReadEntriesError m where
@@ -284,7 +276,10 @@ readEntries res =
         Left err -> pure (Left (ReadEntriesError err))
         Right Nothing -> pure (Left (EntryDoesNotExist (Right idx)))
         Right (Just e) -> pure (Right (OneEntry e))
-    ByIndices interval -> fmap ManyEntries <$> readEntriesByIndices interval
+    ByIndices interval ->
+      fmap ManyEntries <$> readEntriesByIndices interval
+    ByHash entryHash -> undefined
+    ByHashes entryHashes -> undefined
 
 -- | Read entries from the log between two indices
 readEntriesByIndices
