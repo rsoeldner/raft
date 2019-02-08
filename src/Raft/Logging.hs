@@ -30,7 +30,8 @@ data LogCtx
 
 -- | Representation of the logs' destination
 data LogDest
-  = LogFile FilePath
+  = LogWith (forall m. MonadIO m => Severity -> Text -> m ())
+  | LogFile FilePath
   | LogStdout
 
 -- | Representation of the severity of the logs
@@ -84,12 +85,16 @@ instance RaftLogger v m => RaftLogger v (RaftLoggerT v m) where
 --------------------------------------------------------------------------------
 
 logToDest :: MonadIO m => LogCtx -> LogMsg -> m ()
-logToDest LogCtx{..} logMsg =
+logToDest LogCtx{..} logMsg = do
+  let msgSeverity = severity logMsg
   case logCtxDest of
-    LogStdout -> if severity logMsg >= logCtxSeverity
+    LogWith f -> if msgSeverity >= logCtxSeverity
+                  then liftIO $ f msgSeverity (logMsgToText logMsg)
+                  else pure ()
+    LogStdout -> if msgSeverity >= logCtxSeverity
                     then liftIO $ putText (logMsgToText logMsg)
                     else pure ()
-    LogFile fp -> if severity logMsg >= logCtxSeverity
+    LogFile fp -> if msgSeverity >= logCtxSeverity
                     then liftIO $ appendFile fp (logMsgToText logMsg <> "\n")
                     else pure ()
 logToDest NoLogs _ = pure ()
