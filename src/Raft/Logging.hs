@@ -21,16 +21,16 @@ import Raft.NodeState
 import Raft.Types
 
 -- | Representation of the logs' context
-data LogCtx
+data LogCtx m
   = LogCtx
-    { logCtxDest :: LogDest
+    { logCtxDest :: LogDest m
     , logCtxSeverity :: Severity
     }
   | NoLogs
 
 -- | Representation of the logs' destination
-data LogDest
-  = LogWith (forall m. MonadIO m => Severity -> Text -> m ())
+data LogDest m
+  = LogWith (MonadIO m => Severity -> Text -> m ())
   | LogFile FilePath
   | LogStdout
 
@@ -84,12 +84,12 @@ instance RaftLogger v m => RaftLogger v (RaftLoggerT v m) where
 -- Logging with IO
 --------------------------------------------------------------------------------
 
-logToDest :: MonadIO m => LogCtx -> LogMsg -> m ()
+logToDest :: MonadIO m => LogCtx m -> LogMsg -> m ()
 logToDest LogCtx{..} logMsg = do
   let msgSeverity = severity logMsg
   case logCtxDest of
     LogWith f -> if msgSeverity >= logCtxSeverity
-                  then liftIO $ f msgSeverity (logMsgToText logMsg)
+                  then f msgSeverity (logMsgToText logMsg)
                   else pure ()
     LogStdout -> if msgSeverity >= logCtxSeverity
                     then liftIO $ putText (logMsgToText logMsg)
@@ -105,20 +105,20 @@ logToStdout s = logToDest $ LogCtx LogStdout s
 logToFile :: MonadIO m => FilePath -> Severity -> LogMsg -> m ()
 logToFile fp s = logToDest $ LogCtx (LogFile fp) s
 
-logWithSeverityIO :: forall m v. (RaftLogger v m, MonadIO m) => Severity -> LogCtx -> Text -> m ()
+logWithSeverityIO :: forall m v. (RaftLogger v m, MonadIO m) => Severity -> LogCtx m -> Text -> m ()
 logWithSeverityIO s logCtx msg = do
   logMsgData <- mkLogMsgData msg
   sysTime <- liftIO getSystemTime
   let logMsg = LogMsg (Just sysTime) s logMsgData
   logToDest logCtx logMsg
 
-logInfoIO :: (RaftLogger v m, MonadIO m) => LogCtx -> Text -> m ()
+logInfoIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logInfoIO = logWithSeverityIO Info
 
-logDebugIO :: (RaftLogger v m, MonadIO m) => LogCtx -> Text -> m ()
+logDebugIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logDebugIO = logWithSeverityIO Debug
 
-logCriticalIO :: (RaftLogger v m, MonadIO m) => LogCtx -> Text -> m ()
+logCriticalIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logCriticalIO = logWithSeverityIO Critical
 
 --------------------------------------------------------------------------------
@@ -166,7 +166,7 @@ logAndPanic msg = do
   runRaftLoggerT $ logCritical msg
   panic ("logAndPanic: " <> msg)
 
-logAndPanicIO :: (RaftLogger v m, MonadIO m) => LogCtx -> Text -> m a
+logAndPanicIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m a
 logAndPanicIO logCtx msg = do
   logCriticalIO logCtx msg
   panic ("logAndPanicIO: " <> msg)
