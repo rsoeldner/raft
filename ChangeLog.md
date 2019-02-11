@@ -1,5 +1,10 @@
 # Changelog for raft
 
+## 0.4.1.0
+
+- Improvement: Users can now supply an existing logging function to log internal
+  raft node logs, useful for integration into existing applications.
+
 ## 0.4.0.0
 
 - API change: `MonadRaftAsync` is now `MonadRaftFork`, with a simpler API
