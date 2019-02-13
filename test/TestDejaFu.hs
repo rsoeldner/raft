@@ -38,6 +38,8 @@ import TestUtils
 
 import Raft
 import Raft.Client
+import Raft.Log
+import Raft.Monad
 
 import Data.Time.Clock.System (getSystemTime)
 
@@ -58,19 +60,19 @@ type Store = Map Var Natural
 
 data StoreCtx = StoreCtx
 
-instance RSMP Store StoreCmd where
-  data RSMPError Store StoreCmd = StoreError Text deriving (Show)
-  type RSMPCtx Store StoreCmd = StoreCtx
-  applyCmdRSMP _ store cmd =
+instance RaftStateMachinePure Store StoreCmd where
+  data RaftStateMachinePureError Store StoreCmd = StoreError Text deriving (Show)
+  type RaftStateMachinePureCtx Store StoreCmd = StoreCtx
+  rsmTransition _ store cmd =
     Right $ case cmd of
       Set x n -> Map.insert x n store
       Incr x -> Map.adjust succ x store
 
-instance RSM Store StoreCmd RaftTestM where
+instance RaftStateMachine RaftTestM Store StoreCmd where
   validateCmd _ = pure (Right ())
-  askRSMPCtx = pure StoreCtx
+  askRaftStateMachinePureCtx = pure StoreCtx
 
-type TestEventChan = EventChan ConcIO StoreCmd
+type TestEventChan = RaftEventChan StoreCmd RaftTestM
 type TestEventChans = Map NodeId TestEventChan
 
 type TestClientRespChan = TChan (STM ConcIO) (ClientResponse Store StoreCmd)
@@ -80,7 +82,7 @@ type TestClientRespChans = Map ClientId TestClientRespChan
 data TestNodeEnv = TestNodeEnv
   { testNodeEventChans :: TestEventChans
   , testClientRespChans :: TestClientRespChans
-  , testNodeConfig :: NodeConfig
+  , testRaftNodeConfig :: RaftNodeConfig
   }
 
 -- | Node specific state
@@ -112,7 +114,7 @@ instance Exception RaftTestError
 throwTestErr = throw . RaftTestError
 
 askSelfNodeId :: RaftTestM NodeId
-askSelfNodeId = asks (configNodeId . testNodeConfig)
+askSelfNodeId = asks (configNodeId . testRaftNodeConfig)
 
 lookupNodeEventChan :: NodeId -> RaftTestM TestEventChan
 lookupNodeEventChan nid = do
@@ -137,6 +139,7 @@ modifyNodeState nid f =
 
 instance RaftPersist RaftTestM where
   type RaftPersistError RaftTestM = RaftTestError
+  initializePersistentState = pure (Right ())
   writePersistentState pstate' = do
     nid <- askSelfNodeId
     fmap Right $ modify $ \testState ->
@@ -163,6 +166,11 @@ instance RaftSendClient RaftTestM Store StoreCmd where
     case Map.lookup cid clientRespChans of
       Nothing -> panic "Failed to find client id in environment"
       Just clientRespChan -> atomically (writeTChan clientRespChan cr)
+
+instance RaftInitLog RaftTestM StoreCmd where
+  type RaftInitLogError RaftTestM = RaftTestError
+  -- No log initialization needs to be done here, everything is in memory.
+  initializeLog _ = pure (Right ())
 
 instance RaftWriteLog RaftTestM StoreCmd where
   type RaftWriteLogError RaftTestM = RaftTestError
@@ -200,6 +208,19 @@ instance RaftReadLog RaftTestM StoreCmd where
       Empty -> pure (Right Nothing)
       _ :|> lastEntry -> pure (Right (Just lastEntry))
 
+instance MonadRaftChan StoreCmd RaftTestM where
+  type RaftEventChan StoreCmd RaftTestM = TChan (STM ConcIO) (Event StoreCmd)
+  readRaftChan = RaftTestM . lift . lift . readRaftChan
+  writeRaftChan chan = RaftTestM . lift . lift . writeRaftChan chan
+  newRaftChan = RaftTestM . lift . lift $ newRaftChan
+
+instance MonadRaftFork RaftTestM where
+  type RaftThreadId RaftTestM = RaftThreadId ConcIO
+  raftFork r m = do
+    testNodeEnv <- ask
+    testNodeStates <- get
+    RaftTestM . lift . lift $ raftFork r (runRaftTestM testNodeEnv testNodeStates m)
+
 --------------------------------------------------------------------------------
 
 data TestClientEnv = TestClientEnv
@@ -230,7 +251,7 @@ runRaftTestClientM
   -> RaftTestClientM a
   -> ConcIO a
 runRaftTestClientM cid chan chans rtcm = do
-  raftClientState <- initRaftClientState <$> liftIO newStdGen
+  raftClientState <- initRaftClientState mempty <$> liftIO newStdGen
   let raftClientEnv = RaftClientEnv cid
       testClientEnv = TestClientEnv chan chans
    in flip runReaderT testClientEnv
@@ -265,9 +286,9 @@ runTestNode testEnv testState = do
       runRaftT initRaftNodeState raftEnv $
         handleEventLoop (mempty :: Store)
   where
-    nid = configNodeId (testNodeConfig testEnv)
+    nid = configNodeId (testRaftNodeConfig testEnv)
     Just eventChan = Map.lookup nid (testNodeEventChans testEnv)
-    raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testNodeConfig testEnv) NoLogs
+    raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
     dummyTimer = pure ()
 
 forkTestNodes :: [TestNodeEnv] -> TestNodeStates -> ConcIO [ThreadId ConcIO]

@@ -12,7 +12,7 @@ import           Control.Monad                 (forM, replicateM)
 import           Control.Exception             (bracket)
 import           Control.Monad.IO.Class        (liftIO)
 import           Data.Bifunctor                (bimap)
-import           Data.Char                     (isDigit)
+import           Data.Char                     (isDigit, toLower)
 import           Data.List                     (isInfixOf, (\\), delete)
 import           Data.Maybe                    (isJust, isNothing)
 import qualified Data.Set                      as Set
@@ -167,6 +167,7 @@ postcondition Model {..} act resp = case (act, resp) of
 command :: Handle -> ClientHandleRefs Concrete -> String -> IO (Int, Maybe String)
 command h chs@ClientHandleRefs{..} cmd = go 3 0
   where
+    -- unex is the number of unexpected responses
     go 0 unex = pure (unex, Nothing)
     go n unex = do
       eRes <- do
@@ -176,18 +177,23 @@ command h chs@ClientHandleRefs{..} cmd = go 3 0
         case mresp of
           Nothing   -> do
             hPutStrLn h "'getResponse' timed out"
-            pure (Just (unex, Nothing))
-          Just resp
-            | "Timeout" `isInfixOf` resp ->
-              do hPutStrLn h ("Command timed out, retrying: " ++ show resp)
-                 pure (Just (unex, Nothing))
-            | "Unexpected" `isInfixOf` resp ->
-              do hPutStrLn h
-                   ("Unexpected read/write response, retrying: " ++ show resp)
-                 pure (Just (unex + 1, Nothing))
-            | otherwise ->
-              do hPutStrLn h ("got response `" ++ resp ++ "'")
-                 pure (Just (unex, Just resp))
+            pure (Just (unex + 1, Nothing))
+          Just resp ->
+            if "timeout" `isInfixOf` (map toLower resp)
+            then do
+              hPutStrLn h ("Command timed out, retrying: " ++ show resp)
+              pure (Just (unex + 1, Nothing))
+            else if "Unexpected" `isInfixOf` resp
+              then do
+                hPutStrLn h ("Unexpected read/write response, retrying: " ++ show resp)
+                pure (Just (unex + 1, Nothing))
+              else if "RaftClientSendError" `isInfixOf` resp
+                then do
+                  hPutStrLn h ("Unexpected RaftClientSendError, retrying: " ++ show resp)
+                  pure (Just (unex + 1, Nothing))
+                else do
+                hPutStrLn h ("got response `" ++ resp ++ "'")
+                pure (Just (unex, Just resp))
       case eRes of
         Nothing -> pure (unex, Nothing)
         -- Recurse if command successful

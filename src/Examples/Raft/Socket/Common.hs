@@ -3,9 +3,12 @@ module Examples.Raft.Socket.Common where
 import Protolude
 
 import qualified Data.ByteString as BS
+import qualified Data.Serialize as S
+import qualified Data.Serialize as Get
+import qualified Data.Word8 as W8
+
 import qualified Network.Simple.TCP as N
 import qualified Network.Socket as NS
-import qualified Data.Word8 as W8
 
 import Raft.Types
 
@@ -31,3 +34,20 @@ getFreePort = do
   port <- NS.socketPort sock
   NS.close sock
   pure $ show port
+
+-- | Receive bytes on a socket until an entire message can be decoded.
+-- This function fixes the deserialization of the bytes sent on the socket to
+-- the implementation of the Serialize typeclass.
+recvSerialized :: S.Serialize a => N.Socket -> IO (Maybe a)
+recvSerialized sock = do
+  result <- go $ Get.runGetPartial S.get
+  case result of
+    Get.Fail {} -> pure Nothing
+    Get.Done val _ -> pure . pure $ val
+    Get.Partial {} -> pure Nothing
+  where
+    go getPartial = do
+      bytes <- fromMaybe BS.empty <$> N.recv sock 4096
+      case getPartial bytes  of
+        Get.Partial getNextPartial -> go getNextPartial
+        x -> pure x

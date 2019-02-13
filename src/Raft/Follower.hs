@@ -28,7 +28,7 @@ import Raft.Client
 import Raft.Event
 import Raft.Persistent
 import Raft.Log (entryIndex)
-import Raft.Monad
+import Raft.Transition
 import Raft.Types
 
 --------------------------------------------------------------------------------

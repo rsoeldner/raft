@@ -19,17 +19,18 @@ import qualified Raft.Leader as Leader
 
 import Raft.Action
 import Raft.Event
-import Raft.Monad
+import Raft.Transition
 import Raft.NodeState
 import Raft.Persistent
 import Raft.RPC
+import Raft.StateMachine
 import Raft.Types
 import Raft.Logging (LogMsg)
 
 -- | Main entry point for handling events
 handleEvent
   :: forall sm v.
-     (RSMP sm v, Show v, Serialize v)
+     (RaftStateMachinePure sm v, Show v, Serialize v)
   => RaftNodeState v
   -> TransitionEnv sm v
   -> PersistentState
@@ -141,7 +142,7 @@ mkRaftHandler nodeState =
 
 handleEvent'
   :: forall ns sm v.
-     (RSMP sm v, Show v, Serialize v)
+     (RaftStateMachinePure sm v, Show v, Serialize v)
   => NodeState ns v
   -> TransitionEnv sm v
   -> PersistentState

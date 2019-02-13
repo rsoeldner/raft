@@ -20,18 +20,26 @@ import Data.Time.Clock.System
 import Raft.NodeState
 import Raft.Types
 
--- | Representation of the logs' destination
-data LogDest
-  = LogFile FilePath
-  | LogStdout
+-- | Representation of the logs' context
+data LogCtx m
+  = LogCtx
+    { logCtxDest :: LogDest m
+    , logCtxSeverity :: Severity
+    }
   | NoLogs
+
+-- | Representation of the logs' destination
+data LogDest m
+  = LogWith (MonadIO m => Severity -> Text -> m ())
+  | LogFile FilePath
+  | LogStdout
 
 -- | Representation of the severity of the logs
 data Severity
-  = Info
-  | Debug
+  = Debug
+  | Info
   | Critical
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data LogMsg = LogMsg
   { mTime :: Maybe SystemTime
@@ -76,33 +84,41 @@ instance RaftLogger v m => RaftLogger v (RaftLoggerT v m) where
 -- Logging with IO
 --------------------------------------------------------------------------------
 
-logToDest :: MonadIO m => LogDest -> LogMsg -> m ()
-logToDest logDest logMsg =
-  case logDest of
-    LogStdout -> putText (logMsgToText logMsg)
-    LogFile fp -> liftIO $ appendFile fp (logMsgToText logMsg <> "\n")
-    NoLogs -> pure ()
+logToDest :: MonadIO m => LogCtx m -> LogMsg -> m ()
+logToDest LogCtx{..} logMsg = do
+  let msgSeverity = severity logMsg
+  case logCtxDest of
+    LogWith f -> if msgSeverity >= logCtxSeverity
+                  then f msgSeverity (logMsgToText logMsg)
+                  else pure ()
+    LogStdout -> if msgSeverity >= logCtxSeverity
+                    then liftIO $ putText (logMsgToText logMsg)
+                    else pure ()
+    LogFile fp -> if msgSeverity >= logCtxSeverity
+                    then liftIO $ appendFile fp (logMsgToText logMsg <> "\n")
+                    else pure ()
+logToDest NoLogs _ = pure ()
 
-logToStdout :: MonadIO m => LogMsg -> m ()
-logToStdout = logToDest LogStdout
+logToStdout :: MonadIO m => Severity -> LogMsg -> m ()
+logToStdout s = logToDest $ LogCtx LogStdout s
 
-logToFile :: MonadIO m => FilePath -> LogMsg -> m ()
-logToFile fp = logToDest (LogFile fp)
+logToFile :: MonadIO m => FilePath -> Severity -> LogMsg -> m ()
+logToFile fp s = logToDest $ LogCtx (LogFile fp) s
 
-logWithSeverityIO :: forall m v. (RaftLogger v m, MonadIO m) => Severity -> LogDest -> Text -> m ()
-logWithSeverityIO s logDest msg = do
+logWithSeverityIO :: forall m v. (RaftLogger v m, MonadIO m) => Severity -> LogCtx m -> Text -> m ()
+logWithSeverityIO s logCtx msg = do
   logMsgData <- mkLogMsgData msg
   sysTime <- liftIO getSystemTime
   let logMsg = LogMsg (Just sysTime) s logMsgData
-  logToDest logDest logMsg
+  logToDest logCtx logMsg
 
-logInfoIO :: (RaftLogger v m, MonadIO m) => LogDest -> Text -> m ()
+logInfoIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logInfoIO = logWithSeverityIO Info
 
-logDebugIO :: (RaftLogger v m, MonadIO m) => LogDest -> Text -> m ()
+logDebugIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logDebugIO = logWithSeverityIO Debug
 
-logCriticalIO :: (RaftLogger v m, MonadIO m) => LogDest -> Text -> m ()
+logCriticalIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m ()
 logCriticalIO = logWithSeverityIO Critical
 
 --------------------------------------------------------------------------------
@@ -140,3 +156,17 @@ logDebug = logWithSeverity Debug
 
 logCritical :: RaftLogger v m => Text -> RaftLoggerT v m ()
 logCritical = logWithSeverity Critical
+
+--------------------------------------------------------------------------------
+-- Panic after logging
+--------------------------------------------------------------------------------
+
+logAndPanic :: RaftLogger v m => Text -> m a
+logAndPanic msg = do
+  runRaftLoggerT $ logCritical msg
+  panic ("logAndPanic: " <> msg)
+
+logAndPanicIO :: (RaftLogger v m, MonadIO m) => LogCtx m -> Text -> m a
+logAndPanicIO logCtx msg = do
+  logCriticalIO logCtx msg
+  panic ("logAndPanicIO: " <> msg)
