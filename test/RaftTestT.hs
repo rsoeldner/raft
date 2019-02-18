@@ -1,7 +1,7 @@
 {-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -211,13 +211,13 @@ instance MonadConc m => RaftReadLog (RaftTestT m) StoreCmd where
       Empty -> pure (Right Nothing)
       _ :|> lastEntry -> pure (Right (Just lastEntry))
 
-instance MonadConc m => MonadRaftChan StoreCmd (RaftTestT m) where
-  type RaftEventChan StoreCmd (RaftTestT m) = TChan (STM m) (Event StoreCmd)
+instance (MonadConc m, MonadRaftChan StoreCmd m) => MonadRaftChan StoreCmd (RaftTestT m) where
+  type RaftEventChan StoreCmd (RaftTestT m) = RaftEventChan StoreCmd m
   readRaftChan = RaftTestT . lift . lift . readRaftChan
   writeRaftChan chan = RaftTestT . lift . lift . writeRaftChan chan
-  newRaftChan = RaftTestT . lift . lift $ newRaftChan
+  newRaftChan = RaftTestT . lift . lift $ newRaftChan @StoreCmd @m
 
-instance MonadConc m => MonadRaftFork (RaftTestT m) where
+instance (MonadConc m, MonadRaftFork m) => MonadRaftFork (RaftTestT m) where
   type RaftThreadId (RaftTestT m) = RaftThreadId m
   raftFork r m = do
     testNodeEnv <- ask
@@ -234,7 +234,7 @@ data TestClientEnv m = TestClientEnv
 type RaftTestClientT' m = ReaderT (TestClientEnv m) m
 type RaftTestClientT m = RaftClientT Store StoreCmd (RaftTestClientT' m)
 
-instance MonadConc m => RaftClientSend (RaftTestClientT' m) StoreCmd where
+instance (MonadConc m, MonadFail m) => RaftClientSend (RaftTestClientT' m) StoreCmd where
   type RaftClientSendError (RaftTestClientT' m) StoreCmd = ()
   raftClientSend nid creq = do
     Just nodeEventChan <- asks (Map.lookup nid . testClientEnvNodeEventChans)
@@ -250,7 +250,7 @@ instance MonadConc m => RaftClientRecv (RaftTestClientT' m) Store StoreCmd where
 runRaftTestClientT
   :: (MonadConc m, MonadIO m)
   => ClientId
-  -> (TestClientRespChan m)
+  -> TestClientRespChan m
   -> TestEventChans m
   -> RaftTestClientT m a
   -> m a
@@ -277,14 +277,14 @@ initTestChanMaps = do
 initRaftTestEnvs
   :: Map NodeId (TestEventChan m)
   -> Map ClientId (TestClientRespChan m)
-  -> ([(TestNodeEnv m)], TestNodeStates)
+  -> ([TestNodeEnv m], TestNodeStates)
 initRaftTestEnvs eventChans clientRespChans = (testNodeEnvs, testStates)
   where
     testNodeEnvs = map (TestNodeEnv eventChans clientRespChans) testConfigs
     testStates = Map.fromList $ zip (toList nodeIds) $
       replicate (length nodeIds) (TestNodeState mempty initPersistentState)
 
-runTestNode :: MonadConc m => (TestNodeEnv m) -> TestNodeStates -> m ()
+runTestNode :: MonadConc m => TestNodeEnv m -> TestNodeStates -> m ()
 runTestNode testEnv testState = do
     runRaftTestT testEnv testState $
       runRaftT initRaftNodeState raftEnv $
@@ -295,7 +295,7 @@ runTestNode testEnv testState = do
     raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
     dummyTimer = pure ()
 
-forkTestNodes :: MonadConc m => [(TestNodeEnv m)] -> TestNodeStates -> m [ThreadId m]
+forkTestNodes :: MonadConc m => [TestNodeEnv m] -> TestNodeStates -> m [ThreadId m]
 forkTestNodes testEnvs testStates =
   mapM (fork . flip runTestNode testStates) testEnvs
 
