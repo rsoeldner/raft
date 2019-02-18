@@ -1,8 +1,7 @@
 name:                libraft
 synopsis:            Raft consensus algorithm
-description:         Raft consensus algorithm
 category:            Distributed Systems
-version:             0.1.1.0
+version:             0.4.1.0
 github:              "adjoint-io/raft"
 license:             BSD3
 author:              "Adjoint Inc."
@@ -12,10 +11,7 @@ copyright:           "2018 Adjoint Inc."
 extra-source-files:
 - README.md
 - ChangeLog.md
-
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+- postgres/entries.sql
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
@@ -28,7 +24,7 @@ dependencies:
 - mtl
 - containers
 - text
-- concurrency
+- concurrency >= 1.3.0.0 && < 1.7.0.0
 - transformers
 - exceptions
 - cereal
@@ -49,12 +45,17 @@ dependencies:
 - monad-control
 - transformers-base
 - atomic-write
+- postgresql-simple
+- file-embed
+- dejafu
+- stm
+- async
 
 default-extensions:
   NoImplicitPrelude
   OverloadedStrings
   LambdaCase
-
+  
 library:
   source-dirs: src
   ghc-options:
@@ -82,10 +83,10 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - dejafu
+    - dejafu >= 1.0.0.0 && < 2.0.0.0
     - hunit-dejafu
     - libraft
-    - process
+    - process >= 1.6.3.0 && < 1.7.0.0
     - QuickCheck
     - quickcheck-state-machine
     - tasty
