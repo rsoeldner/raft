@@ -100,7 +100,7 @@ getRandomOpenPort = do
   addr:_ <- getAddrInfo Nothing (Just "localhost") Nothing
   sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
   bind sock (addrAddress addr)
-  SockAddrInet (PortNum port) _ <- getSocketName sock
+  SockAddrInet port _ <- getSocketName sock
   close sock
   return $ fromIntegral port
 
