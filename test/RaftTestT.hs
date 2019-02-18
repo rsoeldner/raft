@@ -119,9 +119,9 @@ throwTestErr = throw . RaftTestError
 askSelfNodeId :: Monad m => RaftTestT m NodeId
 askSelfNodeId = asks (configNodeId . testRaftNodeConfig)
 
-lookupNodeEventChan :: MonadConc m => NodeId -> (RaftTestT m) (TestEventChan m)
+lookupNodeEventChan :: forall m. MonadConc m => NodeId -> RaftTestT m (TestEventChan m)
 lookupNodeEventChan nid = do
-  testChanMap <- asks testNodeEventChans
+  testChanMap <- asks (testNodeEventChans  :: (TestNodeEnv m -> TestEventChans m))
   case Map.lookup nid testChanMap of
     Nothing -> throwTestErr $ "Node id " <> show nid <> " does not exist in TestEnv"
     Just testChan -> pure testChan
@@ -133,7 +133,7 @@ getNodeState nid = do
     Nothing -> throwTestErr $ "Node id " <> show nid <> " does not exist in TestNodeStates"
     Just testNodeState -> pure testNodeState
 
-modifyNodeState :: Monad m =>  NodeId -> (TestNodeState -> TestNodeState) -> (RaftTestT m) ()
+modifyNodeState :: Monad m =>  NodeId -> (TestNodeState -> TestNodeState) -> RaftTestT m ()
 modifyNodeState nid f =
   modify $ \testState ->
     case Map.lookup nid testState of
@@ -158,9 +158,10 @@ instance Monad m => RaftPersist (RaftTestT m) where
       Nothing -> pure $ Left (RaftTestError "Failed to find node in environment")
       Just testNodeState -> pure $ Right (testNodePersistentState testNodeState)
 
-instance MonadConc m => RaftSendRPC (RaftTestT m) StoreCmd where
+instance forall m. MonadConc m => RaftSendRPC (RaftTestT m) StoreCmd where
   sendRPC nid rpc = do
     eventChan <- lookupNodeEventChan nid
+    --eventChan <- (lookupNodeEventChan nid :: (RaftTestT m (TestEventChan m)))
     atomically $ writeTChan eventChan (MessageEvent (RPCMessageEvent rpc))
 
 instance MonadConc m => RaftSendClient (RaftTestT m) Store StoreCmd where
