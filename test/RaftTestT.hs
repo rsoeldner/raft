@@ -40,6 +40,7 @@ import Raft.Log
 import Raft.Monad
 
 import System.Random (mkStdGen, newStdGen)
+import Data.Time.Clock.System (getSystemTime)
 
 import TestUtils
 
@@ -304,4 +305,125 @@ forkTestNodes testEnvs testStates =
 
 --------------------------------------------------------------------------------
 
+leaderElection :: (MonadConc m, MonadIO m) => NodeId -> TestEventChans m -> TestClientRespChans m -> m Store
+leaderElection nid eventChans clientRespChans =
+    runRaftTestClientT client0 client0RespChan eventChans $
+      leaderElection' nid eventChans
+  where
+     Just client0RespChan = Map.lookup client0 clientRespChans
 
+leaderElection' :: (MonadConc m, MonadIO m) => NodeId -> TestEventChans m -> RaftTestClientT m Store
+leaderElection' nid eventChans = do
+    sysTime <- liftIO getSystemTime
+    lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
+    pollForReadResponse nid
+  where
+    Just nodeEventChan = Map.lookup nid eventChans
+
+incrValue :: (MonadConc m, MonadIO m) => TestEventChans m -> TestClientRespChans m -> m (Store, Index)
+incrValue eventChans clientRespChans = do
+    leaderElection node0 eventChans clientRespChans
+    runRaftTestClientT client0 client0RespChan eventChans $ do
+      Right idx <- do
+        syncClientWrite node0 (Set "x" 41)
+        syncClientWrite node0 (Incr"x")
+      store <- pollForReadResponse node0
+      pure (store, idx)
+  where
+    Just client0RespChan = Map.lookup client0 clientRespChans
+
+multIncrValue :: (MonadConc m, MonadIO m) => TestEventChans m -> TestClientRespChans m -> m (Store, Index)
+multIncrValue eventChans clientRespChans = do
+  leaderElection node0 eventChans clientRespChans
+  runRaftTestClientT client0 client0RespChan eventChans $ do
+    syncClientWrite node0 (Set "x" 0)
+    Right idx <-
+      fmap (Maybe.fromJust . lastMay) $
+        replicateM 10 $ syncClientWrite node0 (Incr "x")
+    store <- pollForReadResponse node0
+    pure (store, idx)
+  where
+    Just client0RespChan = Map.lookup client0 clientRespChans
+
+leaderRedirect :: (MonadConc m, MonadIO m) => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
+leaderRedirect eventChans clientRespChans =
+  runRaftTestClientT client0 client0RespChan eventChans $ do
+    Left resp <- syncClientWrite node1 (Set "x" 42)
+    pure resp
+  where
+    Just client0RespChan = Map.lookup client0 clientRespChans
+
+followerRedirNoLeader :: MonadConc m => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
+followerRedirNoLeader = leaderRedirect
+
+followerRedirLeader :: MonadConc m => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
+followerRedirLeader eventChans clientRespChans = do
+    leaderElection node0 eventChans clientRespChans
+    leaderRedirect eventChans clientRespChans
+
+newLeaderElection :: MonadConc m => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
+newLeaderElection eventChans clientRespChans = do
+    leaderElection node0 eventChans clientRespChans
+    leaderElection node1 eventChans clientRespChans
+    leaderElection node2 eventChans clientRespChans
+    leaderElection node1 eventChans clientRespChans
+    runRaftTestClientT client0 client0RespChan eventChans $ do
+      Left ldr <- syncClientRead node0
+      pure ldr
+  where
+    Just client0RespChan = Map.lookup client0 clientRespChans
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+-- | This function can be safely "run" without worry about impacting the client
+-- SerialNum of the client requests.
+--
+-- Warning: If read requests start to include serial numbers, this function will
+-- no longer be safe to `runRaftTestClientT` on.
+pollForReadResponse :: MonadConc m => NodeId -> RaftTestClientT m Store
+pollForReadResponse nid = do
+  eRes <- clientReadFrom nid ClientReadStateMachine
+  case eRes of
+    -- TODO Handle other cases of 'ClientReadResp'
+    Right (ClientReadRespStateMachine res) -> pure res
+    _ -> do
+      liftIO $ Control.Monad.Conc.Class.threadDelay 10000
+      pollForReadResponse nid
+
+syncClientRead :: MonadConc m => NodeId -> RaftTestClientT m (Either CurrentLeader Store)
+syncClientRead nid = do
+  eRes <- clientReadFrom nid ClientReadStateMachine
+  case eRes of
+    -- TODO Handle other cases of 'ClientReadResp'
+    Right (ClientReadRespStateMachine store) -> pure $ Right store
+    Left (RaftClientUnexpectedRedirect (ClientRedirResp ldr)) -> pure $ Left ldr
+    _ -> panic "Failed to recieve valid read response"
+
+syncClientWrite
+  :: MonadConc m
+  => NodeId
+  -> StoreCmd
+  -> RaftTestClientT m (Either CurrentLeader Index)
+syncClientWrite nid cmd = do
+  eRes <- clientWriteTo nid cmd
+  case eRes of
+    Right (ClientWriteResp idx sn) -> do
+      Just nodeEventChan <- lift (asks (Map.lookup nid . testClientEnvNodeEventChans))
+      pure $ Right idx
+    Left (RaftClientUnexpectedRedirect (ClientRedirResp ldr)) -> pure $ Left ldr
+    _ -> panic "Failed to receive client write response..."
+
+heartbeat :: (MonadConc m, MonadIO m) => TestEventChan m -> m ()
+heartbeat eventChan = do
+  sysTime <- liftIO getSystemTime
+  atomically $ writeTChan eventChan (TimeoutEvent sysTime HeartbeatTimeout)
+
+clientReadReq :: ClientId -> Event StoreCmd
+clientReadReq cid = MessageEvent $ ClientRequestEvent $ ClientRequest cid (ClientReadReq ClientReadStateMachine)
+
+clientReadRespChan :: MonadConc m => RaftTestClientT m (ClientResponse Store StoreCmd)
+clientReadRespChan = do
+  clientRespChan <- lift (asks testClientEnvRespChan)
+  lift $ lift $ atomically $ readTChan clientRespChan
