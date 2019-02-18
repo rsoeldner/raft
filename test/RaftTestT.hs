@@ -235,6 +235,7 @@ data TestClientEnv m = TestClientEnv
 
 type RaftTestClientT' m = ReaderT (TestClientEnv m) m
 type RaftTestClientT m = RaftClientT Store StoreCmd (RaftTestClientT' m)
+type RaftTestClientM  = RaftTestClientT ConcIO
 
 instance (MonadConc m, MonadFail m) => RaftClientSend (RaftTestClientT' m) StoreCmd where
   type RaftClientSendError (RaftTestClientT' m) StoreCmd = ()
