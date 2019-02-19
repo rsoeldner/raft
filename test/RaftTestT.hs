@@ -288,7 +288,17 @@ initRaftTestEnvs eventChans clientRespChans = (testNodeEnvs, testStates)
     testStates = Map.fromList $ zip (toList nodeIds) $
       replicate (length nodeIds) (TestNodeState mempty initPersistentState)
 
-runTestNode :: (Typeable m, MonadConc m, MonadIO m, MonadRaftFork m, MonadFail m, MonadRaftChan StoreCmd m) => TestNodeEnv m -> TestNodeStates -> m ()
+runTestNode
+  :: ( Typeable m
+     , MonadConc m
+     , MonadIO m
+     , MonadRaftFork m
+     , MonadFail m
+     , MonadRaftChan StoreCmd m
+     )
+  => TestNodeEnv m
+  -> TestNodeStates
+  -> m ()
 runTestNode testEnv testState = do
     runRaftTestT testEnv testState $
       runRaftT initRaftNodeState raftEnv $
@@ -299,79 +309,19 @@ runTestNode testEnv testState = do
     raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
     dummyTimer = pure ()
 
-forkTestNodes :: (Typeable m, MonadConc m, MonadIO m, MonadRaftFork m, MonadFail m, MonadRaftChan StoreCmd m) => [TestNodeEnv m] -> TestNodeStates -> m [ThreadId m]
+forkTestNodes
+  :: ( Typeable m
+     , MonadConc m
+     , MonadIO m
+     , MonadRaftFork m
+     , MonadFail m
+     , MonadRaftChan StoreCmd m
+     )
+  => [TestNodeEnv m]
+  -> TestNodeStates
+  -> m [ThreadId m]
 forkTestNodes testEnvs testStates =
   mapM (fork . flip runTestNode testStates) testEnvs
-
---------------------------------------------------------------------------------
-
-leaderElection :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> TestEventChans m -> TestClientRespChans m -> m Store
-leaderElection nid eventChans clientRespChans =
-    runRaftTestClientT client0 client0RespChan eventChans $
-      leaderElection' nid eventChans
-  where
-     Just client0RespChan = Map.lookup client0 clientRespChans
-
-leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> TestEventChans m -> RaftTestClientT m Store
-leaderElection' nid eventChans = do
-    sysTime <- liftIO getSystemTime
-    lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
-    pollForReadResponse nid
-  where
-    Just nodeEventChan = Map.lookup nid eventChans
-
-incrValue :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m (Store, Index)
-incrValue eventChans clientRespChans = do
-    leaderElection node0 eventChans clientRespChans
-    runRaftTestClientT client0 client0RespChan eventChans $ do
-      Right idx <- do
-        syncClientWrite node0 (Set "x" 41)
-        syncClientWrite node0 (Incr"x")
-      store <- pollForReadResponse node0
-      pure (store, idx)
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-multIncrValue :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m (Store, Index)
-multIncrValue eventChans clientRespChans = do
-  leaderElection node0 eventChans clientRespChans
-  runRaftTestClientT client0 client0RespChan eventChans $ do
-    syncClientWrite node0 (Set "x" 0)
-    Right idx <-
-      fmap (Maybe.fromJust . lastMay) $
-        replicateM 10 $ syncClientWrite node0 (Incr "x")
-    store <- pollForReadResponse node0
-    pure (store, idx)
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-leaderRedirect :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
-leaderRedirect eventChans clientRespChans =
-  runRaftTestClientT client0 client0RespChan eventChans $ do
-    Left resp <- syncClientWrite node1 (Set "x" 42)
-    pure resp
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-followerRedirNoLeader :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
-followerRedirNoLeader = leaderRedirect
-
-followerRedirLeader :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
-followerRedirLeader eventChans clientRespChans = do
-    leaderElection node0 eventChans clientRespChans
-    leaderRedirect eventChans clientRespChans
-
-newLeaderElection :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m CurrentLeader
-newLeaderElection eventChans clientRespChans = do
-    leaderElection node0 eventChans clientRespChans
-    leaderElection node1 eventChans clientRespChans
-    leaderElection node2 eventChans clientRespChans
-    leaderElection node1 eventChans clientRespChans
-    runRaftTestClientT client0 client0RespChan eventChans $ do
-      Left ldr <- syncClientRead node0
-      pure ldr
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
 
 --------------------------------------------------------------------------------
 -- Helpers
