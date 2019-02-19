@@ -51,24 +51,26 @@ concurrentRaftTest runTest =
       (eventChans, clientRespChans) <- initTestChanMaps
       let (testNodeEnvs, testNodeStates) = initRaftTestEnvs eventChans clientRespChans
       let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2, idx3]) node0 testNodeStates
-      let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2, idx3']) node1 testNodeStates
-      let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2]) node2 testNodeStates
+      --let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2, idx3']) node1 testNodeStates
+      --let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2]) node2 testNodeStates
       tids <- forkTestNodes testNodeEnvs testNodeStates
+      print "setup"
       pure (tids, (eventChans, clientRespChans))
     teardown = mapM_ killThread . fst
 
     addInitialEntries :: Entries StoreCmd -> TestNodeState ->  TestNodeState
-    addInitialEntries entries nodeState = nodeState {testNodeLog = entries}
-
+    addInitialEntries entries nodeState = nodeState {testNodeLog = entries, testNodePersistentState= PersistentState {currentTerm=Term 3, votedFor=Just node0}}
 
 followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO ()
-followerCatchup eventChans clientRespChans =
+followerCatchup eventChans clientRespChans = do
+  print "Hello"
   runRaftTestClientT client0 client0RespChan eventChans $ do
-    leaderElection'' node0
+    print "Hello"
+    --leaderElection'' node0
     --Right store <- syncClientRead node0
     pure ()
   where
-    leaderElection'' nid = leaderElection' nid eventChans
+    --leaderElection'' nid = leaderElection' nid eventChans
     Just client0RespChan = Map.lookup client0 clientRespChans
 
 test_asd = testCase "wowo" $ do
