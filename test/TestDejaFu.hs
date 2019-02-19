@@ -96,13 +96,6 @@ leaderElection nid eventChans clientRespChans =
   where
      Just client0RespChan = Map.lookup client0 clientRespChans
 
-leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> TestEventChans m -> RaftTestClientT m Store
-leaderElection' nid eventChans = do
-    sysTime <- liftIO getSystemTime
-    lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
-    pollForReadResponse nid
-  where
-    Just nodeEventChan = Map.lookup nid eventChans
 
 incrValue :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m -> m (Store, Index)
 incrValue eventChans clientRespChans = do

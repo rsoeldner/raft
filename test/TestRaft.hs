@@ -60,12 +60,12 @@ concurrentRaftTest runTest =
     addInitialEntries entries nodeState = nodeState {testNodeLog = entries}
 
 
-
-
 followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO Store
 followerCatchup eventChans clientRespChans =
   runRaftTestClientT client0 client0RespChan eventChans $ do
-    Right store <- syncClientRead node1
+    leaderElection'' node0
+    Right store <- syncClientRead node0
     pure store
   where
+    leaderElection'' nid = leaderElection' nid eventChans
     Just client0RespChan = Map.lookup client0 clientRespChans
