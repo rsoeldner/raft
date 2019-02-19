@@ -59,7 +59,7 @@ test_concurrency =
 
 testConcurrentProps
   :: (Eq a, Show a)
-  => (TestEventChans -> TestClientRespChans -> ConcIO a)
+  => (TestEventChans ConcIO -> TestClientRespChans ConcIO -> ConcIO a)
   -> a
   -> TestTree
 testConcurrentProps test expected =
@@ -73,7 +73,7 @@ testConcurrentProps test expected =
       { _way = randomly (mkStdGen 42) 100
       }
 
-    concurrentRaftTest :: (TestEventChans -> TestClientRespChans -> ConcIO a) -> ConcIO a
+    concurrentRaftTest :: (TestEventChans ConcIO-> TestClientRespChans ConcIO-> ConcIO a) -> ConcIO a
     concurrentRaftTest runTest =
         Control.Monad.Catch.bracket setup teardown $
           uncurry runTest . snd
@@ -85,9 +85,9 @@ testConcurrentProps test expected =
           pure (tids, (eventChans, clientRespChans))
 
         teardown = mapM_ killThread . fst
-comprehensive :: TestEventChans -> TestClientRespChans -> ConcIO (Index, Store, CurrentLeader)
+comprehensive :: TestEventChans ConcIO -> TestClientRespChans ConcIO -> ConcIO (Index, Store, CurrentLeader)
 comprehensive eventChans clientRespChans =
-  runRaftTestClientM client0 client0RespChan eventChans $ do
+  runRaftTestClientT client0 client0RespChan eventChans $ do
     leaderElection'' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
