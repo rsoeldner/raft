@@ -62,8 +62,8 @@ concurrentRaftTest runTest =
 
 
 
-test_:: TestEventChans IO -> TestClientRespChans IO -> IO Store
-test_ eventChans clientRespChans =
+followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO Store
+followerCatchup eventChans clientRespChans =
   runRaftTestClientT client0 client0RespChan eventChans $ do
     Right store <- syncClientRead node1
     pure store
