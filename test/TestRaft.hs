@@ -21,25 +21,25 @@ import TestUtils
 idx1 = Entry (Index 1)
       (Term 1)
       (EntryValue (Set "x" 1))
-      (ClientIssuer client0 (SerialNum 1))
+      (ClientIssuer client0 (SerialNum 0))
       genesisHash
 
 idx2 = Entry (Index 2)
       (Term 2)
       (EntryValue (Set "x" 2))
-      (ClientIssuer client0 (SerialNum 1))
+      (ClientIssuer client0 (SerialNum 0))
       (hashEntry idx1)
 
 idx3 = Entry (Index 3)
       (Term 3)
       (EntryValue (Set "x" 3))
-      (ClientIssuer client0 (SerialNum 1))
+      (ClientIssuer client0 (SerialNum 0))
       (hashEntry idx2)
 
 idx3' = Entry (Index 3)
         (Term 3)
         (EntryValue (Set "x" 0))
-        (ClientIssuer client0 (SerialNum 1))
+        (ClientIssuer client0 (SerialNum 0))
         (hashEntry idx2)
 
 concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> IO a) -> IO a
@@ -50,27 +50,29 @@ concurrentRaftTest runTest =
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       let (testNodeEnvs, testNodeStates) = initRaftTestEnvs eventChans clientRespChans
-      let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2, idx3]) node0 testNodeStates
-      --let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2, idx3']) node1 testNodeStates
-      --let testNodeStates = Map.adjust (addInitialEntries $ Seq.fromList [idx1, idx2]) node2 testNodeStates
-      tids <- forkTestNodes testNodeEnvs testNodeStates
+      let testNodeStates' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
+      let testNodeStates''  = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 testNodeStates'
+      let testNodeStates''' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 testNodeStates''
+      tids <- forkTestNodes testNodeEnvs testNodeStates'''
       print "setup"
       pure (tids, (eventChans, clientRespChans))
     teardown = mapM_ killThread . fst
 
-    addInitialEntries :: Entries StoreCmd -> TestNodeState ->  TestNodeState
-    addInitialEntries entries nodeState = nodeState {testNodeLog = entries, testNodePersistentState= PersistentState {currentTerm=Term 3, votedFor=Just node0}}
+    addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
+    addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState= PersistentState {currentTerm=term, votedFor=Nothing}}
 
 followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO ()
 followerCatchup eventChans clientRespChans = do
   print "Hello"
   runRaftTestClientT client0 client0RespChan eventChans $ do
     print "Hello"
-    --leaderElection'' node0
-    --Right store <- syncClientRead node0
+    leaderElection'' node0
+    Right idx2 <- syncClientWrite node0 (Set "x" 7)
+    Right store <- syncClientRead node0
+    print store
     pure ()
   where
-    --leaderElection'' nid = leaderElection' nid eventChans
+    leaderElection'' nid = leaderElection' nid eventChans
     Just client0RespChan = Map.lookup client0 clientRespChans
 
 test_asd = testCase "wowo" $ do

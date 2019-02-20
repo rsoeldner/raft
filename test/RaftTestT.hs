@@ -91,7 +91,7 @@ data TestNodeState = TestNodeState
   { testNodeLog :: Entries StoreCmd
   , testNodePersistentState :: PersistentState
   }
-
+  deriving (Show)
 -- | A map of node ids to their respective node data
 type TestNodeStates = Map NodeId TestNodeState
 
@@ -163,7 +163,6 @@ instance Monad m => RaftPersist (RaftTestT m) where
 instance forall m. MonadConc m => RaftSendRPC (RaftTestT m) StoreCmd where
   sendRPC nid rpc = do
     eventChan <- lookupNodeEventChan nid
-    --eventChan <- (lookupNodeEventChan nid :: (RaftTestT m (TestEventChan m)))
     atomically $ writeTChan eventChan (MessageEvent (RPCMessageEvent rpc))
 
 instance MonadConc m => RaftSendClient (RaftTestT m) Store StoreCmd where
@@ -218,7 +217,7 @@ instance forall m. (MonadConc m, MonadRaftChan StoreCmd m) => MonadRaftChan Stor
   type RaftEventChan StoreCmd (RaftTestT m) = TestEventChan m
   readRaftChan = atomically . readTChan
   writeRaftChan chan ev = atomically $ writeTChan chan ev
-  newRaftChan = atomically $ newTChan
+  newRaftChan = atomically newTChan
 
 instance (MonadConc m, MonadRaftFork m) => MonadRaftFork (RaftTestT m) where
   type RaftThreadId (RaftTestT m) = RaftThreadId m
