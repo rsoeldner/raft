@@ -362,7 +362,9 @@ syncClientWrite nid cmd = do
       Just nodeEventChan <- lift (asks (Map.lookup nid . testClientEnvNodeEventChans))
       pure $ Right idx
     Left (RaftClientUnexpectedRedirect (ClientRedirResp ldr)) -> pure $ Left ldr
-    _ -> panic "Failed to receive client write response..."
+    a -> do
+      print a
+      panic "Failed to receive client write response..."
 
 heartbeat :: (MonadConc m, MonadIO m) => TestEventChan m -> m ()
 heartbeat eventChan = do

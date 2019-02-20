@@ -54,18 +54,15 @@ concurrentRaftTest runTest =
       let testNodeStates''  = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 testNodeStates'
       let testNodeStates''' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 testNodeStates''
       tids <- forkTestNodes testNodeEnvs testNodeStates'''
-      print "setup"
       pure (tids, (eventChans, clientRespChans))
     teardown = mapM_ killThread . fst
 
     addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
-    addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState= PersistentState {currentTerm=term, votedFor=Nothing}}
+    addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
 
 followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO ()
-followerCatchup eventChans clientRespChans = do
-  print "Hello"
+followerCatchup eventChans clientRespChans =
   runRaftTestClientT client0 client0RespChan eventChans $ do
-    print "Hello"
     leaderElection'' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right store <- syncClientRead node0
