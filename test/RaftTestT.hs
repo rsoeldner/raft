@@ -54,7 +54,7 @@ type Var = ByteString
 data StoreCmd
   = Set Var Natural
   | Incr Var
-  deriving (Show, Generic)
+  deriving (Show, Generic, Eq)
 
 instance S.Serialize StoreCmd
 
@@ -85,7 +85,7 @@ data TestNodeState = TestNodeState
   { testNodeLog :: Entries StoreCmd
   , testNodePersistentState :: PersistentState
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | A map of node ids to their respective node data
 type TestNodeStates = Map NodeId TestNodeState

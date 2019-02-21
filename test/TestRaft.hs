@@ -17,6 +17,7 @@ import Raft
 import Raft.Client
 import Raft.Log
 import Raft.Monad
+import Raft.Types
 
 import RaftTestT
 import TestUtils
@@ -54,9 +55,9 @@ concurrentRaftTest runTest =
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       testNodeStatesTVar <- initTestStates
-      atomically $ modifyTVar testNodeStatesTVar $
+      atomically $ modifyTVar' testNodeStatesTVar $
         \testNodeStates ->
-          let t1 = Map.adjust (addInitialEntries (Seq.fromList [idx2]) (Term 3)) node0 testNodeStates
+          let t1 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
               t2 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 t1
               t3 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 t2
           in t3
@@ -69,18 +70,26 @@ concurrentRaftTest runTest =
     addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
     addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
 
-followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO ()
+followerCatchup
+  :: TestEventChans IO
+  -> TestClientRespChans IO
+  -> TVar (STM IO) TestNodeStates
+  -> IO (Maybe TestNodeState, Maybe TestNodeState, Maybe TestNodeState)
 followerCatchup eventChans clientRespChans testNodeStatesTVar =
   runRaftTestClientT client0 client0RespChan eventChans $ do
     leaderElection'' node0
-    print "a"
     --Right store0 <- syncClientRead node0
-    --testNodeStates <- get
-    pure ()
-  where
-    leaderElection'' nid = leaderElection' nid eventChans
-    Just client0RespChan = Map.lookup client0 clientRespChans
+    testNodeStates <- lift $ atomically $ readTVar testNodeStatesTVar
+    --pure (elems testNodeStates)
+    pure
+      ( Map.lookup node0 testNodeStates
+      , Map.lookup node1 testNodeStates
+      , Map.lookup node2 testNodeStates
+      )
+ where
+  leaderElection'' nid = leaderElection' nid eventChans
+  Just client0RespChan = Map.lookup client0 clientRespChans
 
-test_asd = testCase "wowo" $ do
-  a <- concurrentRaftTest followerCatchup
-  assertEqual "a" a ()
+test_followerCatchup = testCase "Follower Catchup" $ do
+  (t1, t2, t3) <- concurrentRaftTest followerCatchup
+  assertEqual "resulting nodestate not all the same" t1 t2
