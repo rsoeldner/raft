@@ -140,8 +140,7 @@ getNodeState nid = do
 
 modifyNodeState :: MonadConc m =>  NodeId -> (TestNodeState -> TestNodeState) -> RaftTestT m ()
 modifyNodeState nid f = do
-  testStateTVar <- (asks testNodeStates)
-
+  testStateTVar <- asks testNodeStates
   atomically $ modifyTVar' testStateTVar $ \testState ->
     case Map.lookup nid testState of
       Nothing -> panic $ "Node id " <> show nid <> " does not exist in TestNodeStates"
@@ -152,7 +151,7 @@ instance MonadConc m => RaftPersist (RaftTestT m) where
   initializePersistentState = pure (Right ())
   writePersistentState pstate' = do
     nid <- askSelfNodeId
-    testStateTVar <- (asks testNodeStates)
+    testStateTVar <- asks testNodeStates
     fmap Right $ atomically $ modifyTVar' testStateTVar $ \testState ->
       case Map.lookup nid testState of
         Nothing -> testState
@@ -282,19 +281,20 @@ initTestChanMaps = do
       atomically (replicateM 1 newTChan)
   pure (eventChans, clientRespChans)
 
+initTestStates :: MonadConc m => TVar (STM m) TestNodeStates
+initTestStates = atomically $ newTVar testStates
+  where
+    testStates = Map.fromList $ zip (toList nodeIds) $
+      replicate (length nodeIds) (TestNodeState mempty initPersistentState)
+
 initRaftTestEnvs
   :: MonadConc m
   => Map NodeId (TestEventChan m)
   -> Map ClientId (TestClientRespChan m)
-  -> m [TestNodeEnv m]
-initRaftTestEnvs eventChans clientRespChans = do
-  testStatesTVar <- atomically $ newTVar testStates
-  let testNodeEnvs = map (TestNodeEnv eventChans clientRespChans testStatesTVar) testConfigs
-  pure testNodeEnvs
-  where
-    --testNodeEnvs = map (TestNodeEnv eventChans clientRespChans) testConfigs
-    testStates = Map.fromList $ zip (toList nodeIds) $
-      replicate (length nodeIds) (TestNodeState mempty initPersistentState)
+  -> TVar (STM m) TestNodeStates
+  -> [TestNodeEnv m]
+initRaftTestEnvs eventChans clientRespChans testStatesTVar =
+  map (TestNodeEnv eventChans clientRespChans testStatesTVar) testConfigs
 
 runTestNode
   :: ( Typeable m

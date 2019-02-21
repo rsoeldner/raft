@@ -3,6 +3,7 @@ module TestRaft where
 import Protolude
 
 import Control.Monad.Catch
+import Control.Concurrent.Classy.STM.TVar
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?), singleton,)
 import qualified Data.Sequence as Seq
 import qualified Data.Map as Map
@@ -50,19 +51,20 @@ concurrentRaftTest runTest =
   where
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
-      testNodeEnvs <- initRaftTestEnvs eventChans clientRespChans
+      testNodeStatesTVar <- initTestStates
+      testNodeEnvs <- initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
       --let testNodeStates' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
       --let testNodeStates''  = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 testNodeStates'
       --let testNodeStates''' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 testNodeStates''
       tids <- forkTestNodes testNodeEnvs
-      pure (tids, (eventChans, clientRespChans))
+      pure (tids, (eventChans, clientRespChans, testNodeEnvs ))
     teardown = mapM_ killThread . fst
 
     addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
     addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
 
-followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> IO ()
-followerCatchup eventChans clientRespChans =
+followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO ()
+followerCatchup eventChans clientRespChans testNodeStatesTVar =
   runRaftTestClientT client0 client0RespChan eventChans $ do
     leaderElection'' node0
     Right store0 <- syncClientRead node0
