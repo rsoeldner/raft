@@ -54,10 +54,14 @@ concurrentRaftTest runTest =
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       testNodeStatesTVar <- initTestStates
+      atomically $ modifyTVar testNodeStatesTVar $
+        \testNodeStates ->
+          let t1 = Map.adjust (addInitialEntries (Seq.fromList [idx2]) (Term 3)) node0 testNodeStates
+              t2 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 t1
+              t3 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 t2
+          in t3
+
       let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
-      --let testNodeStates' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
-      --let testNodeStates''  = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 testNodeStates'
-      --let testNodeStates''' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 testNodeStates''
       tids <- forkTestNodes testNodeEnvs
       pure (tids, (eventChans, clientRespChans, testNodeStatesTVar ))
     teardown = mapM_ killThread . fst
@@ -69,7 +73,8 @@ followerCatchup :: TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) 
 followerCatchup eventChans clientRespChans testNodeStatesTVar =
   runRaftTestClientT client0 client0RespChan eventChans $ do
     leaderElection'' node0
-    Right store0 <- syncClientRead node0
+    print "a"
+    --Right store0 <- syncClientRead node0
     --testNodeStates <- get
     pure ()
   where
