@@ -1,8 +1,11 @@
 {-# LANGUAGE GADTs #-}
 module TestRaft where
-import Protolude
+import Protolude hiding
+  (STM, TVar, TChan, newTChan, readMVar, readTChan, writeTChan, atomically, killThread, ThreadId, readTVar, writeTVar)
+
 
 import Control.Monad.Catch
+import Control.Monad.Conc.Class
 import Control.Concurrent.Classy.STM.TVar
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?), singleton,)
 import qualified Data.Sequence as Seq
@@ -44,20 +47,19 @@ idx3' = Entry (Index 3)
       (LeaderIssuer (LeaderId node1))
         (hashEntry idx2)
 
-concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> IO a) -> IO a
+concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO a) -> IO a
 concurrentRaftTest runTest =
-    Control.Monad.Catch.bracket setup teardown $
-      uncurry runTest . snd
+    Control.Monad.Catch.bracket setup teardown $ \(a,(b, c, d)) -> runTest b c d
   where
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       testNodeStatesTVar <- initTestStates
-      testNodeEnvs <- initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
+      let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
       --let testNodeStates' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
       --let testNodeStates''  = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 testNodeStates'
       --let testNodeStates''' = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 testNodeStates''
       tids <- forkTestNodes testNodeEnvs
-      pure (tids, (eventChans, clientRespChans, testNodeEnvs ))
+      pure (tids, (eventChans, clientRespChans, testNodeStatesTVar ))
     teardown = mapM_ killThread . fst
 
     addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState

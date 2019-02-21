@@ -81,7 +81,9 @@ testConcurrentProps test expected =
       where
         setup = do
           (eventChans, clientRespChans) <- initTestChanMaps
-          testNodeEnvs <- initRaftTestEnvs eventChans clientRespChans
+
+          testNodeStatesTVar <- initTestStates
+          let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
           tids <- forkTestNodes testNodeEnvs
           pure (tids, (eventChans, clientRespChans))
 

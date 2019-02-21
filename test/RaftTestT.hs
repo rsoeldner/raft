@@ -281,7 +281,7 @@ initTestChanMaps = do
       atomically (replicateM 1 newTChan)
   pure (eventChans, clientRespChans)
 
-initTestStates :: MonadConc m => TVar (STM m) TestNodeStates
+initTestStates :: MonadConc m => m (TVar (STM m) TestNodeStates)
 initTestStates = atomically $ newTVar testStates
   where
     testStates = Map.fromList $ zip (toList nodeIds) $
@@ -327,7 +327,7 @@ forkTestNodes
   => [TestNodeEnv m]
   -> m [ThreadId m]
 forkTestNodes testEnvs =
-  mapM (fork . runTestNode ) testEnvs
+  mapM (fork . runTestNode) testEnvs
 
 --------------------------------------------------------------------------------
 -- Helpers
