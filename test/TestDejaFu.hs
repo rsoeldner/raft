@@ -81,8 +81,8 @@ testConcurrentProps test expected =
       where
         setup = do
           (eventChans, clientRespChans) <- initTestChanMaps
-          let (testNodeEnvs, testNodeStates) = initRaftTestEnvs eventChans clientRespChans
-          tids <- forkTestNodes testNodeEnvs testNodeStates
+          testNodeEnvs <- initRaftTestEnvs eventChans clientRespChans
+          tids <- forkTestNodes testNodeEnvs
           pure (tids, (eventChans, clientRespChans))
 
         teardown = mapM_ killThread . fst

@@ -15,7 +15,7 @@
 module RaftTestT where
 
 import Protolude hiding
-  (STM, TChan, newTChan, readMVar, readTChan, writeTChan, atomically, killThread, ThreadId)
+  (STM, TVar, TChan, newTChan, readMVar, readTChan, writeTChan, atomically, killThread, ThreadId, readTVar, writeTVar)
 
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?))
 import qualified Data.Map as Map
@@ -27,6 +27,7 @@ import Control.Monad.Fail
 import Control.Monad.Catch
 import Control.Monad.Conc.Class
 import Control.Concurrent.Classy.STM.TChan
+import Control.Concurrent.Classy.STM.TVar
 
 import Test.DejaFu hiding (get, ThreadId)
 import Test.DejaFu.Internal (Settings(..))
@@ -79,25 +80,27 @@ type TestEventChans m = Map NodeId (TestEventChan m)
 type TestClientRespChan m = TChan (STM m) (ClientResponse Store StoreCmd)
 type TestClientRespChans m = Map ClientId (TestClientRespChan m)
 
--- | Node specific environment
-data TestNodeEnv m = TestNodeEnv
-  { testNodeEventChans :: TestEventChans m
-  , testClientRespChans :: TestClientRespChans m
-  , testRaftNodeConfig :: RaftNodeConfig
-  }
-
 -- | Node specific state
 data TestNodeState = TestNodeState
   { testNodeLog :: Entries StoreCmd
   , testNodePersistentState :: PersistentState
   }
   deriving (Show)
+
 -- | A map of node ids to their respective node data
 type TestNodeStates = Map NodeId TestNodeState
 
+-- | Node specific environment
+data TestNodeEnv m = TestNodeEnv
+  { testNodeEventChans :: TestEventChans m
+  , testClientRespChans :: TestClientRespChans m
+  , testNodeStates :: TVar (STM m) TestNodeStates
+  , testRaftNodeConfig :: RaftNodeConfig
+  }
+
 newtype RaftTestT m a = RaftTestT {
-    unRaftTestT :: ReaderT (TestNodeEnv m) (StateT TestNodeStates m) a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadReader (TestNodeEnv m), MonadState TestNodeStates, MonadFail)
+    unRaftTestT :: ReaderT (TestNodeEnv m) m a
+  } deriving (Functor, Applicative, Monad, MonadIO, MonadReader (TestNodeEnv m), MonadFail)
 
 type RaftTestM = RaftTestT ConcIO
 
@@ -106,9 +109,9 @@ deriving newtype instance MonadCatch m => MonadCatch (RaftTestT m)
 deriving newtype instance MonadMask m => MonadMask (RaftTestT m)
 deriving newtype instance MonadConc m => MonadConc (RaftTestT m)
 
-runRaftTestT :: Monad m => TestNodeEnv m -> TestNodeStates -> RaftTestT m a -> m a
-runRaftTestT testEnv testState =
-  flip evalStateT testState . flip runReaderT testEnv . unRaftTestT
+runRaftTestT :: Monad m => TestNodeEnv m -> RaftTestT m a -> m a
+runRaftTestT testEnv =
+  flip runReaderT testEnv . unRaftTestT
 
 newtype RaftTestError = RaftTestError Text
   deriving (Show)
@@ -130,24 +133,27 @@ lookupNodeEventChan nid = do
 
 getNodeState :: MonadConc m => NodeId -> (RaftTestT m) TestNodeState
 getNodeState nid = do
-  testState <- get
+  testState <- readTVarConc =<< asks testNodeStates
   case Map.lookup nid testState of
     Nothing -> throwTestErr $ "Node id " <> show nid <> " does not exist in TestNodeStates"
     Just testNodeState -> pure testNodeState
 
-modifyNodeState :: Monad m =>  NodeId -> (TestNodeState -> TestNodeState) -> RaftTestT m ()
-modifyNodeState nid f =
-  modify $ \testState ->
+modifyNodeState :: MonadConc m =>  NodeId -> (TestNodeState -> TestNodeState) -> RaftTestT m ()
+modifyNodeState nid f = do
+  testStateTVar <- (asks testNodeStates)
+
+  atomically $ modifyTVar' testStateTVar $ \testState ->
     case Map.lookup nid testState of
       Nothing -> panic $ "Node id " <> show nid <> " does not exist in TestNodeStates"
       Just testNodeState -> Map.insert nid (f testNodeState) testState
 
-instance Monad m => RaftPersist (RaftTestT m) where
+instance MonadConc m => RaftPersist (RaftTestT m) where
   type RaftPersistError (RaftTestT m) = RaftTestError
   initializePersistentState = pure (Right ())
   writePersistentState pstate' = do
     nid <- askSelfNodeId
-    fmap Right $ modify $ \testState ->
+    testStateTVar <- (asks testNodeStates)
+    fmap Right $ atomically $ modifyTVar' testStateTVar $ \testState ->
       case Map.lookup nid testState of
         Nothing -> testState
         Just testNodeState -> do
@@ -155,7 +161,7 @@ instance Monad m => RaftPersist (RaftTestT m) where
           Map.insert nid newTestNodeState testState
   readPersistentState = do
     nid <- askSelfNodeId
-    testState <- get
+    testState <- readTVarConc =<< asks testNodeStates
     case Map.lookup nid testState of
       Nothing -> pure $ Left (RaftTestError "Failed to find node in environment")
       Just testNodeState -> pure $ Right (testNodePersistentState testNodeState)
@@ -177,7 +183,7 @@ instance Monad m => RaftInitLog (RaftTestT m) StoreCmd where
   -- No log initialization needs to be done here, everything is in memory.
   initializeLog _ = pure (Right ())
 
-instance Monad m => RaftWriteLog (RaftTestT m) StoreCmd where
+instance MonadConc m => RaftWriteLog (RaftTestT m) StoreCmd where
   type RaftWriteLogError (RaftTestT m) = RaftTestError
   writeLogEntries entries = do
     nid <- askSelfNodeId
@@ -186,7 +192,7 @@ instance Monad m => RaftWriteLog (RaftTestT m) StoreCmd where
         let log = testNodeLog testNodeState
          in testNodeState { testNodeLog = log >< entries }
 
-instance Monad m => RaftDeleteLog (RaftTestT m) StoreCmd where
+instance MonadConc m => RaftDeleteLog (RaftTestT m) StoreCmd where
   type RaftDeleteLogError (RaftTestT m) = RaftTestError
   deleteLogEntriesFrom idx = do
     nid <- askSelfNodeId
@@ -223,8 +229,7 @@ instance (MonadConc m, MonadRaftFork m) => MonadRaftFork (RaftTestT m) where
   type RaftThreadId (RaftTestT m) = RaftThreadId m
   raftFork r m = do
     testNodeEnv <- ask
-    testNodeStates <- get
-    RaftTestT . lift . lift $ raftFork r (runRaftTestT testNodeEnv testNodeStates m)
+    RaftTestT . lift $ raftFork r (runRaftTestT testNodeEnv m)
 
 --------------------------------------------------------------------------------
 
@@ -278,12 +283,16 @@ initTestChanMaps = do
   pure (eventChans, clientRespChans)
 
 initRaftTestEnvs
-  :: Map NodeId (TestEventChan m)
+  :: MonadConc m
+  => Map NodeId (TestEventChan m)
   -> Map ClientId (TestClientRespChan m)
-  -> ([TestNodeEnv m], TestNodeStates)
-initRaftTestEnvs eventChans clientRespChans = (testNodeEnvs, testStates)
+  -> m [TestNodeEnv m]
+initRaftTestEnvs eventChans clientRespChans = do
+  testStatesTVar <- atomically $ newTVar testStates
+  let testNodeEnvs = map (TestNodeEnv eventChans clientRespChans testStatesTVar) testConfigs
+  pure testNodeEnvs
   where
-    testNodeEnvs = map (TestNodeEnv eventChans clientRespChans) testConfigs
+    --testNodeEnvs = map (TestNodeEnv eventChans clientRespChans) testConfigs
     testStates = Map.fromList $ zip (toList nodeIds) $
       replicate (length nodeIds) (TestNodeState mempty initPersistentState)
 
@@ -296,10 +305,9 @@ runTestNode
      , MonadRaftChan StoreCmd m
      )
   => TestNodeEnv m
-  -> TestNodeStates
   -> m ()
-runTestNode testEnv testState = do
-    runRaftTestT testEnv testState $
+runTestNode testEnv = do
+    runRaftTestT testEnv $
       runRaftT initRaftNodeState raftEnv $
         handleEventLoop (mempty :: Store)
   where
@@ -317,10 +325,9 @@ forkTestNodes
      , MonadRaftChan StoreCmd m
      )
   => [TestNodeEnv m]
-  -> TestNodeStates
   -> m [ThreadId m]
-forkTestNodes testEnvs testStates =
-  mapM (fork . flip runTestNode testStates) testEnvs
+forkTestNodes testEnvs =
+  mapM (fork . runTestNode ) testEnvs
 
 --------------------------------------------------------------------------------
 -- Helpers
