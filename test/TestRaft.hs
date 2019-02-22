@@ -44,8 +44,8 @@ idx3 = Entry (Index 3)
 
 idx3' = Entry (Index 3)
         (Term 3)
-        NoValue
-      (LeaderIssuer (LeaderId node1))
+        (EntryValue $ Set "x" 2)
+        (LeaderIssuer (LeaderId node1))
         (hashEntry idx2)
 
 concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO a) -> IO a
@@ -78,9 +78,8 @@ followerCatchup
 followerCatchup eventChans clientRespChans testNodeStatesTVar =
   runRaftTestClientT client0 client0RespChan eventChans $ do
     leaderElection'' node0
-    --Right store0 <- syncClientRead node0
     testNodeStates <- lift $ atomically $ readTVar testNodeStatesTVar
-    --pure (elems testNodeStates)
+    liftIO $ Protolude.threadDelay 1000000
     pure
       ( Map.lookup node0 testNodeStates
       , Map.lookup node1 testNodeStates
@@ -92,4 +91,6 @@ followerCatchup eventChans clientRespChans testNodeStatesTVar =
 
 test_followerCatchup = testCase "Follower Catchup" $ do
   (t1, t2, t3) <- concurrentRaftTest followerCatchup
-  assertEqual "resulting nodestate not all the same" t1 t2
+  assertEqual "node behind is caught up" t1 t3
+  assertEqual "node with conflict is updated correctly" t1 t2
+  --assertEqual "resulting nodestate all the same: node1 node2" t1 t3
