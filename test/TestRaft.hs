@@ -22,24 +22,24 @@ import Raft.Types
 import RaftTestT
 import TestUtils
 
---idx1, idx2, idx3, idx3' :: Entry StoreCmd
---idx1 = Entry (Index 1)
-      --(Term 1)
-      --NoValue
-      --(LeaderIssuer (LeaderId node0))
-      --genesisHash
+idx1, idx2, idx3, idx3' :: Entry StoreCmd
+idx1 = Entry (Index 1)
+      (Term 1)
+      NoValue
+      (LeaderIssuer (LeaderId node0))
+      genesisHash
 
---idx2 = Entry (Index 2)
-      --(Term 2)
-      --NoValue
-      --(LeaderIssuer (LeaderId node0))
-      --genesisHash
+idx2 = Entry (Index 2)
+      (Term 2)
+      NoValue
+      (LeaderIssuer (LeaderId node0))
+      genesisHash
 
---idx3 = Entry (Index 3)
-      --(Term 3)
-      --NoValue
-      --(LeaderIssuer (LeaderId node0))
-      --genesisHash
+idx3 = Entry (Index 3)
+      (Term 3)
+      NoValue
+      (LeaderIssuer (LeaderId node0))
+      genesisHash
 
 idx3' = Entry (Index 3)
         (Term 3)
@@ -49,10 +49,12 @@ idx3' = Entry (Index 3)
 
 genEntries :: Integer -> Integer -> [Entry StoreCmd]
 genEntries numTerms numEntriesPerTerm =
-  fmap gen (zip [1 .. numTerms * numEntriesPerTerm] [1 ..])
+  fmap gen (zip indexes terms)
  where
+  indexes = [1 .. numTerms * numEntriesPerTerm]
+  terms = concatMap (replicate (fromInteger numEntriesPerTerm)) [1 .. numTerms]
   gen (i, t) = Entry (Index (fromInteger i))
-                     (Term t)
+                     (Term (fromInteger t))
                      NoValue
                      (LeaderIssuer (LeaderId node0))
                      genesisHash
