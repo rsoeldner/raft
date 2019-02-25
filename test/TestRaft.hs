@@ -22,30 +22,30 @@ import Raft.Types
 import RaftTestT
 import TestUtils
 
-idx1, idx2, idx3, idx3' :: Entry StoreCmd
-idx1 = Entry (Index 1)
-      (Term 1)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      genesisHash
+--idx1, idx2, idx3, idx3' :: Entry StoreCmd
+--idx1 = Entry (Index 1)
+      --(Term 1)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
-idx2 = Entry (Index 2)
-      (Term 2)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      genesisHash
+--idx2 = Entry (Index 2)
+      --(Term 2)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
-idx3 = Entry (Index 3)
-      (Term 3)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      genesisHash
+--idx3 = Entry (Index 3)
+      --(Term 3)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
-idx3' = Entry (Index 3)
-        (Term 3)
-        (EntryValue $ Set "x" 2)
-        (LeaderIssuer (LeaderId node1))
-        genesisHash
+--idx3' = Entry (Index 3)
+        --(Term 3)
+        --(EntryValue $ Set "x" 2)
+        --(LeaderIssuer (LeaderId node1))
+        --genesisHash
 
 genEntries :: Integer -> Integer -> [Entry StoreCmd]
 genEntries numTerms numEntriesPerTerm =
@@ -61,17 +61,26 @@ genEntries numTerms numEntriesPerTerm =
 
 concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO a) -> IO a
 concurrentRaftTest runTest =
-    Control.Monad.Catch.bracket setup teardown $ \(a,(b, c, d)) -> runTest b c d
+    Control.Monad.Catch.bracket setup teardown $ \(a, (b, c, d)) -> runTest b c d
   where
+
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       testNodeStatesTVar <- initTestStates
       atomically $ modifyTVar' testNodeStatesTVar $
         \testNodeStates ->
-          let entries = genEntries 10 3
-              t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 3)) node0 testNodeStates
-              t2 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 t1
-              t3 = Map.adjust (addInitialEntries (Seq.fromList (take 5 entries)) (Term 2)) node2 t2
+          let entries = genEntries 4 3 -- 4 terms, each with 3 entries
+              entriesMutated = fmap
+                (\e -> if entryTerm e == Term 4
+                  then e { entryIssuer = LeaderIssuer (LeaderId node1)
+                         , entryValue  = EntryValue $ Set "x" 2
+                         }
+                  else e
+                )
+                entries
+              t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 4)) node0 testNodeStates
+              t2 = Map.adjust (addInitialEntries (Seq.fromList entriesMutated) (Term 3)) node1 t1
+              t3 = Map.adjust (addInitialEntries (Seq.fromList (take 4 entries)) (Term 2)) node2 t2
           in t3
 
       let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
@@ -105,4 +114,3 @@ test_followerCatchup = testCase "Follower Catchup" $ do
   (t1, t2, t3) <- concurrentRaftTest followerCatchup
   assertEqual "node behind is caught up" t1 t3
   assertEqual "node with conflict is updated correctly" t1 t2
-  --assertEqual "resulting nodestate all the same: node1 node2" t1 t3
