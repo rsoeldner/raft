@@ -394,3 +394,51 @@ leaderElection' nid eventChans = do
     pollForReadResponse nid
   where
     Just nodeEventChan = Map.lookup nid eventChans
+
+
+--------------------------------------------------------------------------------
+-- Test Harness
+--------------------------------------------------------------------------------
+--
+data TestHarnessNodeConfig v = TestHarnessNodeConfig
+  { startingTerm :: Term
+  , startingEntries :: Entries v
+  }
+
+
+raftTestHarness :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO a) -> IO a
+raftTestHarness test =
+    Control.Monad.Catch.bracket setup teardown $ \(a, (b, c, d)) -> runTest b c d
+  where
+    setup = do
+      (eventChans, clientRespChans) <- initTestChanMaps
+      testNodeStatesTVar <- initTestStates
+      atomically $ modifyTVar' testNodeStatesTVar $
+        \testNodeStates ->
+          let entries = genEntries 4 3 -- 4 terms, each with 3 entries
+              entriesMutated = fmap
+                (\e -> if entryIndex e == Index 12
+                  then e { entryIssuer = LeaderIssuer (LeaderId node1)
+                         , entryValue  = EntryValue $ Set "x" 2
+                         }
+                  else e
+                )
+                entries
+{-              -- Node0 is the leader-}
+              --t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 4)) node0 testNodeStates
+              ---- Node1 has
+              --t2 = Map.adjust (addInitialEntries (Seq.fromList entriesMutated) (Term 4)) node1 t1
+              ---- Node2 is behind 2 terms
+              {-t3 = Map.adjust (addInitialEntries (Seq.fromList (take 4 entries)) (Term 2)) node2 t2-}
+          in t3
+
+      let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
+      tids <- forkTestNodes testNodeEnvs
+      pure (tids, (eventChans, clientRespChans, testNodeStatesTVar ))
+
+    teardown = mapM_ killThread . fst
+
+    addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
+    addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
+
+

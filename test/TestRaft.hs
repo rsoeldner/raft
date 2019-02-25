@@ -77,10 +77,10 @@ concurrentRaftTest runTest =
                   else e
                 )
                 entries
-              -- Node0 is the leader, is most up to date
+              -- Node0 is the leader
               t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 4)) node0 testNodeStates
               -- Node1 has
-              t2 = Map.adjust (addInitialEntries (Seq.fromList (entriesMutated)) (Term 4)) node1 t1
+              t2 = Map.adjust (addInitialEntries (Seq.fromList entriesMutated) (Term 4)) node1 t1
               -- Node2 is behind 2 terms
               t3 = Map.adjust (addInitialEntries (Seq.fromList (take 4 entries)) (Term 2)) node2 t2
           in t3
@@ -104,8 +104,8 @@ followerCatchup eventChans clientRespChans testNodeStatesTVar =
     lift $ heartbeat (eventChans Map.! node1)
     lift $ heartbeat (eventChans Map.! node2)
     leaderElection'' node0
-    testNodeStates <- lift $ atomically $ readTVar testNodeStatesTVar
     liftIO $ Protolude.threadDelay 3000000
+    testNodeStates <- lift $ atomically $ readTVar testNodeStatesTVar
     pure
       ( Map.lookup node0 testNodeStates
       , Map.lookup node1 testNodeStates
