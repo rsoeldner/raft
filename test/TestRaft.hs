@@ -63,7 +63,6 @@ concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM 
 concurrentRaftTest runTest =
     Control.Monad.Catch.bracket setup teardown $ \(a, (b, c, d)) -> runTest b c d
   where
-
     setup = do
       (eventChans, clientRespChans) <- initTestChanMaps
       testNodeStatesTVar <- initTestStates
@@ -78,8 +77,11 @@ concurrentRaftTest runTest =
                   else e
                 )
                 entries
+              -- Node0 is the leader, is most up to date
               t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 4)) node0 testNodeStates
-              t2 = Map.adjust (addInitialEntries (Seq.fromList entriesMutated) (Term 3)) node1 t1
+              -- Node1 has
+              t2 = Map.adjust (addInitialEntries (Seq.fromList (take 10 entriesMutated)) (Term 4)) node1 t1
+              -- Node2 is behind 2 terms
               t3 = Map.adjust (addInitialEntries (Seq.fromList (take 4 entries)) (Term 2)) node2 t2
           in t3
 
@@ -98,6 +100,7 @@ followerCatchup
   -> IO (Maybe TestNodeState, Maybe TestNodeState, Maybe TestNodeState)
 followerCatchup eventChans clientRespChans testNodeStatesTVar =
   runRaftTestClientT client0 client0RespChan eventChans $ do
+    --heartbeat eventChans
     leaderElection'' node0
     testNodeStates <- lift $ atomically $ readTVar testNodeStatesTVar
     liftIO $ Protolude.threadDelay 1000000
