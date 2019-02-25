@@ -22,31 +22,40 @@ import Raft.Types
 import RaftTestT
 import TestUtils
 
-idx1, idx2, idx3, idx3' :: Entry StoreCmd
-idx1 = Entry (Index 1)
-      (Term 1)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      --(ClientIssuer client0 (SerialNum 0))
-      genesisHash
+--idx1, idx2, idx3, idx3' :: Entry StoreCmd
+--idx1 = Entry (Index 1)
+      --(Term 1)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
-idx2 = Entry (Index 2)
-      (Term 2)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      (hashEntry idx1)
+--idx2 = Entry (Index 2)
+      --(Term 2)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
-idx3 = Entry (Index 3)
-      (Term 3)
-      NoValue
-      (LeaderIssuer (LeaderId node0))
-      (hashEntry idx2)
+--idx3 = Entry (Index 3)
+      --(Term 3)
+      --NoValue
+      --(LeaderIssuer (LeaderId node0))
+      --genesisHash
 
 idx3' = Entry (Index 3)
         (Term 3)
         (EntryValue $ Set "x" 2)
         (LeaderIssuer (LeaderId node1))
-        (hashEntry idx2)
+        genesisHash
+
+genEntries :: Integer -> Integer -> [Entry StoreCmd]
+genEntries numTerms numEntriesPerTerm =
+  fmap gen (zip [1 .. numTerms * numEntriesPerTerm] [1 ..])
+ where
+  gen (i, t) = Entry (Index (fromInteger i))
+                     (Term t)
+                     NoValue
+                     (LeaderIssuer (LeaderId node0))
+                     genesisHash
 
 concurrentRaftTest :: (TestEventChans IO -> TestClientRespChans IO -> TVar (STM IO) TestNodeStates -> IO a) -> IO a
 concurrentRaftTest runTest =
@@ -57,9 +66,10 @@ concurrentRaftTest runTest =
       testNodeStatesTVar <- initTestStates
       atomically $ modifyTVar' testNodeStatesTVar $
         \testNodeStates ->
-          let t1 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3]) (Term 3)) node0 testNodeStates
+          let entries = genEntries 10 3
+              t1 = Map.adjust (addInitialEntries (Seq.fromList entries) (Term 3)) node0 testNodeStates
               t2 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2, idx3']) (Term 3)) node1 t1
-              t3 = Map.adjust (addInitialEntries (Seq.fromList [idx1, idx2]) (Term 2)) node2 t2
+              t3 = Map.adjust (addInitialEntries (Seq.fromList (take 5 entries)) (Term 2)) node2 t2
           in t3
 
       let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
