@@ -61,7 +61,7 @@ test_concurrency =
 
 testConcurrentProps
   :: (Eq a, Show a)
-  => (TestEventChans ConcIO -> TestClientRespChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> ConcIO a)
+  => (TestEventChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> RaftTestClientT ConcIO a)
   -> a
   -> TestTree
 testConcurrentProps test expected =
@@ -75,90 +75,59 @@ testConcurrentProps test expected =
       { _way = randomly (mkStdGen 42) 100
       }
 
-    --concurrentRaftTest :: (TestEventChans ConcIO -> TestClientRespChans ConcIO-> ConcIO a) -> ConcIO a
-    --concurrentRaftTest runTest = do
+leaderElection
+  :: (MonadConc m, MonadIO m, MonadFail m)
+  => NodeId
+  -> TestEventChans m
+  -> TVar (STM m) TestNodeStates
+  -> RaftTestClientT m Store
+leaderElection nid eventChans testNodeStatesTVar = leaderElection' nid eventChans
 
+incrValue, multIncrValue
+  :: (MonadConc m, MonadIO m, MonadFail m)
+  => TestEventChans m
+  -> TVar (STM m) TestNodeStates
+  -> RaftTestClientT m (Store, Index)
+incrValue eventChans _ = do
+  leaderElection' node0 eventChans
+  Right idx <- do
+    syncClientWrite node0 (Set "x" 41)
+    syncClientWrite node0 (Incr "x")
+  Right store <- syncClientRead node0
+  pure (store, idx)
 
-        --Control.Monad.Catch.bracket setup teardown $
-          --uncurry runTest . snd
-      --where
-        --setup = do
-          --(eventChans, clientRespChans) <- initTestChanMaps
-
-          --testNodeStatesTVar <- initTestStates
-          --let testNodeEnvs = initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
-          --tids <- forkTestNodes testNodeEnvs
-          --pure (tids, (eventChans, clientRespChans))
-
-        --teardown = mapM_ killThread . fst
-
---------------------------------------------------------------------------------
-
-leaderElection :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates -> m Store
-leaderElection nid eventChans clientRespChans e =
-    runRaftTestClientT client0 client0RespChan eventChans $
-      leaderElection' nid eventChans
-  where
-     Just client0RespChan = Map.lookup client0 clientRespChans
-
-
-incrValue :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m (Store, Index)
-incrValue eventChans clientRespChans e = do
-    leaderElection node0 eventChans clientRespChans e
-    runRaftTestClientT client0 client0RespChan eventChans $ do
-      leaderElection' node0 eventChans
-      Right idx <- do
-        syncClientWrite node0 (Set "x" 41)
-        syncClientWrite node0 (Incr"x")
-      Right store <- syncClientRead node0
-      pure (store, idx)
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-multIncrValue :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m (Store, Index)
-multIncrValue eventChans clientRespChans e = do
-  leaderElection node0 eventChans clientRespChans e
-  runRaftTestClientT client0 client0RespChan eventChans $ do
+multIncrValue eventChans _ = do
+    leaderElection' node0 eventChans
     syncClientWrite node0 (Set "x" 0)
     Right idx <-
       fmap (Maybe.fromJust . lastMay) $
         replicateM 10 $ syncClientWrite node0 (Incr "x")
     store <- pollForReadResponse node0
     pure (store, idx)
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
 
-leaderRedirect :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m CurrentLeader
-leaderRedirect eventChans clientRespChans e =
-  runRaftTestClientT client0 client0RespChan eventChans $ do
+leaderRedirect, followerRedirNoLeader, followerRedirLeader, newLeaderElection
+  :: (MonadConc m, MonadIO m, MonadFail m)
+  => TestEventChans m
+  -> TVar (STM m) TestNodeStates
+  -> RaftTestClientT m CurrentLeader
+leaderRedirect eventChans _ = do
     Left resp <- syncClientWrite node1 (Set "x" 42)
     pure resp
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-followerRedirNoLeader :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m CurrentLeader
 followerRedirNoLeader = leaderRedirect
+followerRedirLeader eventChans testNodeStatesTVar = do
+    leaderElection' node0 eventChans
+    leaderRedirect eventChans testNodeStatesTVar
 
-followerRedirLeader :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m CurrentLeader
-followerRedirLeader eventChans clientRespChans e = do
-    leaderElection node0 eventChans clientRespChans e
-    leaderRedirect eventChans clientRespChans e
+newLeaderElection eventChans _ = do
+    leaderElection' node0 eventChans
+    leaderElection' node1 eventChans
+    leaderElection' node2 eventChans
+    leaderElection' node1 eventChans
+    Left ldr <- syncClientRead node0
+    pure ldr
 
-newLeaderElection :: (MonadConc m, MonadIO m, MonadFail m) => TestEventChans m -> TestClientRespChans m ->TVar (STM m) TestNodeStates-> m CurrentLeader
-newLeaderElection eventChans clientRespChans e = do
-    leaderElection node0 eventChans clientRespChans e
-    leaderElection node1 eventChans clientRespChans e
-    leaderElection node2 eventChans clientRespChans e
-    leaderElection node1 eventChans clientRespChans e
-    runRaftTestClientT client0 client0RespChan eventChans $ do
-      Left ldr <- syncClientRead node0
-      pure ldr
-  where
-    Just client0RespChan = Map.lookup client0 clientRespChans
-
-comprehensive :: TestEventChans ConcIO -> TestClientRespChans ConcIO ->TVar (STM ConcIO) TestNodeStates-> ConcIO (Index, Store, CurrentLeader)
-comprehensive eventChans clientRespChans e =
-  runRaftTestClientT client0 client0RespChan eventChans $ do
+comprehensive :: TestEventChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> RaftTestClientT ConcIO (Index, Store, CurrentLeader)
+comprehensive eventChans _ = do
     leaderElection'' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
@@ -192,5 +161,4 @@ comprehensive eventChans clientRespChans e =
     pure (idx14, store, ldr)
   where
     leaderElection'' nid = leaderElection' nid eventChans
-    Just client0RespChan = Map.lookup client0 clientRespChans
 

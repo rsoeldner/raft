@@ -408,15 +408,16 @@ raftTestHarness
      )
   => TestNodeStates
   -> (  TestEventChans m
-     -> TestClientRespChans m
      -> TVar (STM m) TestNodeStates
-     -> m a
+     -> RaftTestClientT m a
      )
   -> m a
 raftTestHarness startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
     $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) ->
-        raftTest eventChans clientRespChans testNodeStatesTVar
+        let Just client0RespChan = Map.lookup client0 clientRespChans
+        in runRaftTestClientT client0 client0RespChan eventChans $ raftTest eventChans testNodeStatesTVar
+
  where
   setup = do
     (eventChans, clientRespChans) <- initTestChanMaps
