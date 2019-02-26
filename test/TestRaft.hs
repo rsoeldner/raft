@@ -46,17 +46,29 @@ import TestUtils
         --(EntryValue $ Set "x" 2)
         --(LeaderIssuer (LeaderId node1))
         --genesisHash
+        --
 
 
-genEntries :: Integer -> Integer -> [Entry StoreCmd]
-genEntries numTerms numEntriesPerTerm =
-  fmap gen (zip indexes terms)
- where
-  indexes = [1 .. numTerms * numEntriesPerTerm]
-  terms = concatMap (replicate (fromInteger numEntriesPerTerm)) [1 .. numTerms]
-  gen (i, t) = Entry (Index (fromInteger i))
-                     (Term (fromInteger t))
-                     NoValue
-                     (LeaderIssuer (LeaderId node0))
-                     genesisHash
+entries, entriesMutated :: Entries StoreCmd
+entries = genEntries 4 3  -- 4 terms, each with 3 entries
 
+entriesMutated = fmap
+  (\e -> if entryIndex e == Index 12
+    then e { entryIssuer = LeaderIssuer (LeaderId node1)
+           , entryValue  = EntryValue $ Set "x" 2
+           }
+    else e
+  )
+  entries
+
+
+electLeaderAndWait eventChans _ = do
+    leaderElection' node0
+    liftIO $ Protolude.threadDelay 1000000
+
+
+test_handleAppendEntries = testCase "Follower Catchup" $ do
+  let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 1, Seq.take 2 entries)]
+
+  (res, endingNodeStates) <- raftTestHarness startingNodeStates $ electLeaderAndWait
+  assertTestNodeStatesAllEqual endingNodeStates

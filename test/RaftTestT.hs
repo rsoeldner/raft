@@ -18,6 +18,7 @@ import Protolude hiding
   (STM, TVar, TChan, newTChan, readMVar, readTChan, writeTChan, atomically, killThread, ThreadId, readTVar, writeTVar)
 
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?))
+import qualified Data.Sequence as Seq
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as S
@@ -395,7 +396,7 @@ leaderElection' nid = do
 
 
 --------------------------------------------------------------------------------
--- Test Harness
+-- Test Harness and helpers
 --------------------------------------------------------------------------------
 
 raftTestHarness
@@ -411,13 +412,15 @@ raftTestHarness
      -> TVar (STM m) TestNodeStates
      -> RaftTestClientT m a
      )
-   -> m (a, TVar (STM m) TestNodeStates)
+   -> m (a, TestNodeStates)
 raftTestHarness startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
     $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) -> do
         let Just client0RespChan = Map.lookup client0 clientRespChans
         res <- runRaftTestClientT client0 client0RespChan eventChans $ raftTest eventChans testNodeStatesTVar
-        pure (res, testNodeStatesTVar)
+
+        testStates <- readTVarConc testNodeStatesTVar
+        pure (res, testStates)
 
  where
   setup = do
@@ -429,8 +432,43 @@ raftTestHarness startingNodeStates raftTest =
     pure (tids, (eventChans, clientRespChans, testNodeStatesTVar))
   teardown = mapM_ killThread . fst
 
-addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
-addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
+initTestNodeStates :: [(NodeId, Term, Entries StoreCmd)] -> TestNodeStates
+initTestNodeStates startingValues =
+  foldl adjustTestNodeStates emptyTestStates startingValues
+ where
+  adjustTestNodeStates nodeState (node, term, entries) =
+    Map.adjust (adjustSingle entries term) node nodeState
 
---assertTestNodeStatesEqual :: MonadConc m => TVar (STM m) TestNodeStates -> Assertion
-assertTestNodeStatesEqual = undefined
+  adjustSingle
+    :: Entries StoreCmd -> Term -> TestNodeState -> TestNodeState
+  adjustSingle entries term nodeState = nodeState
+    { testNodeLog             = entries
+    , testNodePersistentState = PersistentState
+      { currentTerm = term
+      , votedFor    = Nothing
+      }
+    }
+
+genEntries :: Integer -> Integer -> Entries StoreCmd
+genEntries numTerms numEntriesPerTerm =
+  Seq.fromList $ fmap gen (zip indexes terms)
+ where
+  indexes = [1 .. numTerms * numEntriesPerTerm]
+  terms = concatMap (replicate (fromInteger numEntriesPerTerm)) [1 .. numTerms]
+  gen (i, t) = Entry (Index (fromInteger i))
+                     (Term (fromInteger t))
+                     NoValue
+                     (LeaderIssuer (LeaderId node0))
+                     genesisHash
+
+
+assertTestNodeStatesAllEqual :: TestNodeStates -> Assertion
+assertTestNodeStatesAllEqual testStates = do
+    -- TODO don't hardcode to just 3 nodes!!!
+    assertEqual "Ending states don't match" (testStates Map.! node0) (testStates Map.! node1)
+    assertEqual "Ending states don't match" (testStates Map.! node1) (testStates Map.! node2)
+
+
+
+
+
