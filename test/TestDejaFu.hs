@@ -17,6 +17,7 @@ import Protolude hiding
 
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?))
 import qualified Data.Map as Map
+import qualified Data.Sequence as Seq
 import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as S
 import Numeric.Natural
@@ -31,6 +32,7 @@ import Test.DejaFu hiding (get, ThreadId)
 import Test.DejaFu.Internal (Settings(..))
 import Test.DejaFu.Conc hiding (ThreadId)
 import Test.Tasty
+import Test.Tasty.HUnit
 import Test.Tasty.DejaFu hiding (get)
 
 import System.Random (mkStdGen, newStdGen)
@@ -160,4 +162,42 @@ comprehensive _ _ = do
     Left ldr <- syncClientRead node1
 
     pure (idx14, store, ldr)
+
+
+entries, entriesMutated :: Entries StoreCmd
+entries = genEntries 4 3  -- 4 terms, each with 3 entries
+
+entriesMutated = fmap
+  (\e -> if entryIndex e == Index 12
+    then e { entryIssuer = LeaderIssuer (LeaderId node1)
+           , entryValue  = EntryValue $ Set "x" 2
+           }
+    else e
+  )
+  entries
+
+
+electLeaderAndWait eventChans _ = do
+    leaderElection' node0
+    liftIO $ Protolude.threadDelay 1000000
+
+test_AEFollowerBehind =
+  testDejafusWithSettings settings
+    [ ("No deadlocks", deadlocksNever)
+    , ("No Exceptions", exceptionsNever)
+    --, ("Success", alwaysTrue (== ()))
+    ] $  test
+  where
+    settings = defaultSettings
+      { _way = randomly (mkStdGen 42) 100
+      }
+    test :: ConcIO ()
+    test = do
+       let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 1, Seq.take 2 entries)]
+
+       (res, endingNodeStates) <- raftTestHarness startingNodeStates  electLeaderAndWait
+       print endingNodeStates
+       -- TODO check logs differ from starting state
+       --assertTestNodeStatesAllEqual endingNodeStates
+
 
