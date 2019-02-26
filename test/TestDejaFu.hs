@@ -194,8 +194,9 @@ test_AEFollowerBehind =
       }
     test :: ConcIO ()
     test = do
-       let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 1, Seq.take 2 entries)]
+       let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 2, Seq.take 4 entries), (node2, Term 2, Seq.take 4 entries)]
 
+       --print startingNodeStates
        (res, endingNodeStates) <- raftTestHarness startingNodeStates  electLeaderAndWait
        print 1
        -- TODO check logs differ from starting state
