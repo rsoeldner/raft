@@ -281,10 +281,8 @@ initTestChanMaps = do
       atomically (replicateM 1 newTChan)
   pure (eventChans, clientRespChans)
 
-initTestStates :: MonadConc m => m (TVar (STM m) TestNodeStates)
-initTestStates = atomically $ newTVar testStates
-  where
-    testStates = Map.fromList $ zip (toList nodeIds) $
+emptyTestStates :: TestNodeStates
+emptyTestStates = Map.fromList $ zip (toList nodeIds) $
       replicate (length nodeIds) (TestNodeState mempty initPersistentState)
 
 initRaftTestEnvs
@@ -415,14 +413,14 @@ raftTestHarness
      -> m a
      )
   -> m a
-raftTestHarness startingStates raftTest =
+raftTestHarness startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
     $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) ->
         raftTest eventChans clientRespChans testNodeStatesTVar
  where
   setup = do
     (eventChans, clientRespChans) <- initTestChanMaps
-    testNodeStatesTVar <- initTestStates
+    testNodeStatesTVar <- atomically $ newTVar startingNodeStates
     let testNodeEnvs =
           initRaftTestEnvs eventChans clientRespChans testNodeStatesTVar
     tids <- forkTestNodes testNodeEnvs
