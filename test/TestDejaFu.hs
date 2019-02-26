@@ -170,7 +170,7 @@ entries = genEntries 4 3  -- 4 terms, each with 3 entries
 entriesMutated = fmap
   (\e -> if entryIndex e == Index 12
     then e { entryIssuer = LeaderIssuer (LeaderId node1)
-           , entryValue  = EntryValue $ Set "x" 2
+           , entryTerm = Term 5
            }
     else e
   )
@@ -179,7 +179,8 @@ entriesMutated = fmap
 
 electLeaderAndWait eventChans _ = do
     leaderElection' node0
-    liftIO $ Protolude.threadDelay 1000000
+    Right idx2 <- syncClientWrite node0 (Set "x" 7)
+    leaderElection' node0
 
 test_AEFollowerBehind =
   testDejafusWithSettings settings
@@ -196,7 +197,26 @@ test_AEFollowerBehind =
        let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 1, Seq.take 2 entries)]
 
        (res, endingNodeStates) <- raftTestHarness startingNodeStates  electLeaderAndWait
-       print endingNodeStates
+       print 1
+       -- TODO check logs differ from starting state
+       --assertTestNodeStatesAllEqual endingNodeStates
+
+test_AEFollowerSameIndexDifferentTerm =
+  testDejafusWithSettings settings
+    [ ("No deadlocks", deadlocksNever)
+    , ("No Exceptions", exceptionsNever)
+    --, ("Success", alwaysTrue (== ()))
+    ] $  test
+  where
+    settings = defaultSettings
+      { _way = randomly (mkStdGen 42) 100
+      }
+    test :: ConcIO ()
+    test = do
+       let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 5, entriesMutated)]
+
+       (res, endingNodeStates) <- raftTestHarness startingNodeStates  electLeaderAndWait
+       print 1
        -- TODO check logs differ from starting state
        --assertTestNodeStatesAllEqual endingNodeStates
 
