@@ -33,7 +33,7 @@ import Test.DejaFu hiding (get, ThreadId)
 import Test.DejaFu.Internal (Settings(..))
 import Test.DejaFu.Conc hiding (ThreadId)
 import Test.Tasty
-import Test.Tasty.DejaFu hiding (get)
+import Test.Tasty.HUnit
 
 import Raft
 import Raft.Client
@@ -385,13 +385,13 @@ clientReadRespChan = do
   lift $ lift $ atomically $ readTChan clientRespChan
 
 
-leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> TestEventChans m -> RaftTestClientT m Store
-leaderElection' nid eventChans = do
+leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> RaftTestClientT m Store
+leaderElection' nid = do
+    eventChans <- lift $ asks testClientEnvNodeEventChans
+    let Just nodeEventChan = Map.lookup nid eventChans
     sysTime <- liftIO getSystemTime
     lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
     pollForReadResponse nid
-  where
-    Just nodeEventChan = Map.lookup nid eventChans
 
 
 --------------------------------------------------------------------------------
@@ -411,12 +411,13 @@ raftTestHarness
      -> TVar (STM m) TestNodeStates
      -> RaftTestClientT m a
      )
-  -> m a
+   -> m (a, TVar (STM m) TestNodeStates)
 raftTestHarness startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
-    $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) ->
+    $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) -> do
         let Just client0RespChan = Map.lookup client0 clientRespChans
-        in runRaftTestClientT client0 client0RespChan eventChans $ raftTest eventChans testNodeStatesTVar
+        res <- runRaftTestClientT client0 client0RespChan eventChans $ raftTest eventChans testNodeStatesTVar
+        pure (res, testNodeStatesTVar)
 
  where
   setup = do
@@ -431,4 +432,5 @@ raftTestHarness startingNodeStates raftTest =
 addInitialEntries :: Entries StoreCmd -> Term -> TestNodeState ->  TestNodeState
 addInitialEntries entries term nodeState = nodeState {testNodeLog = entries, testNodePersistentState = PersistentState {currentTerm=term, votedFor=Nothing}}
 
-
+--assertTestNodeStatesEqual :: MonadConc m => TVar (STM m) TestNodeStates -> Assertion
+assertTestNodeStatesEqual = undefined

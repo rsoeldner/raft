@@ -69,7 +69,7 @@ testConcurrentProps test expected =
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
     , ("Success", alwaysTrue (== Right expected))
-    ] $ raftTestHarness emptyTestStates test
+    ] $ fst <$> raftTestHarness emptyTestStates test
   where
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
@@ -81,23 +81,23 @@ leaderElection
   -> TestEventChans m
   -> TVar (STM m) TestNodeStates
   -> RaftTestClientT m Store
-leaderElection nid eventChans testNodeStatesTVar = leaderElection' nid eventChans
+leaderElection nid eventChans testNodeStatesTVar = leaderElection' nid
 
 incrValue, multIncrValue
   :: (MonadConc m, MonadIO m, MonadFail m)
   => TestEventChans m
   -> TVar (STM m) TestNodeStates
   -> RaftTestClientT m (Store, Index)
-incrValue eventChans _ = do
-  leaderElection' node0 eventChans
+incrValue _ _ = do
+  leaderElection' node0
   Right idx <- do
     syncClientWrite node0 (Set "x" 41)
     syncClientWrite node0 (Incr "x")
   Right store <- syncClientRead node0
   pure (store, idx)
 
-multIncrValue eventChans _ = do
-    leaderElection' node0 eventChans
+multIncrValue _ _ = do
+    leaderElection' node0
     syncClientWrite node0 (Set "x" 0)
     Right idx <-
       fmap (Maybe.fromJust . lastMay) $
@@ -110,38 +110,39 @@ leaderRedirect, followerRedirNoLeader, followerRedirLeader, newLeaderElection
   => TestEventChans m
   -> TVar (STM m) TestNodeStates
   -> RaftTestClientT m CurrentLeader
-leaderRedirect eventChans _ = do
+leaderRedirect _ _ = do
     Left resp <- syncClientWrite node1 (Set "x" 42)
     pure resp
+
 followerRedirNoLeader = leaderRedirect
 followerRedirLeader eventChans testNodeStatesTVar = do
-    leaderElection' node0 eventChans
+    leaderElection' node0
     leaderRedirect eventChans testNodeStatesTVar
 
 newLeaderElection eventChans _ = do
-    leaderElection' node0 eventChans
-    leaderElection' node1 eventChans
-    leaderElection' node2 eventChans
-    leaderElection' node1 eventChans
+    leaderElection' node0
+    leaderElection' node1
+    leaderElection' node2
+    leaderElection' node1
     Left ldr <- syncClientRead node0
     pure ldr
 
 comprehensive :: TestEventChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> RaftTestClientT ConcIO (Index, Store, CurrentLeader)
-comprehensive eventChans _ = do
-    leaderElection'' node0
+comprehensive _ _ = do
+    leaderElection' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
     Right _ <- syncClientRead node0
 
-    leaderElection'' node1
+    leaderElection' node1
     Right idx5 <- syncClientWrite node1 (Incr "x")
     Right idx6 <- syncClientWrite node1 (Incr "y")
     Right idx7 <- syncClientWrite node1 (Set "z" 40)
     Left (CurrentLeader _) <- syncClientWrite node2 (Incr "y")
     Right _ <- syncClientRead node1
 
-    leaderElection'' node2
+    leaderElection' node2
     Right idx9 <- syncClientWrite node2 (Incr "z")
     Right idx10 <- syncClientWrite node2 (Incr "x")
     Left _ <- syncClientWrite node1 (Set "q" 100)
@@ -151,7 +152,7 @@ comprehensive eventChans _ = do
     Left (CurrentLeader _) <- syncClientWrite node0 (Incr "y")
     Right _ <- syncClientRead node2
 
-    leaderElection'' node0
+    leaderElection' node0
     Right idx14 <- syncClientWrite node0 (Incr "z")
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
 
@@ -159,6 +160,4 @@ comprehensive eventChans _ = do
     Left ldr <- syncClientRead node1
 
     pure (idx14, store, ldr)
-  where
-    leaderElection'' nid = leaderElection' nid eventChans
 
