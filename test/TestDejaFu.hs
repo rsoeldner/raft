@@ -40,6 +40,7 @@ import Data.Time.Clock.System (getSystemTime)
 
 import TestUtils
 import RaftTestT
+import SampleEntries
 
 import Raft
 import Raft.Client
@@ -193,45 +194,10 @@ test_AEFollowerBehind = dejaFuLogMatchingTest
   ]
   expectedStates
 
-test_AEFollowerBehindN = testCase "Follower behind" $ do
-  testStates <- logMatchingTest
-    [ (node0, Term 4, entries)
-    , (node1, Term 2, Seq.take 2 entries)
-    , (node2, Term 4, entries)
-    ]
-  assertTestNodeStatesAllEqual (Term 5) testStates
-
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
   --, (node1, Term 2, entriesMutated)
   --, (node2, Term 4, entries)
   --]
   --expectedStates
-
---------------------------------------------------------------------------------
--- Sample entries
---------------------------------------------------------------------------------
-entries :: Entries StoreCmd
-entries = genEntries 4 3  -- 4 terms, each with 3 entries
-
-entriesMutated :: Entries StoreCmd
-entriesMutated = fmap
-  (\e -> if entryIndex e == Index 12
-    then e { entryIssuer = LeaderIssuer (LeaderId node1)
-           , entryValue  = EntryValue $ Set "x" 2
-           }
-    else e
-  )
-  entries
-
-expectedStates =
-  ( Term 5
-  , entries
-    Seq.|> Entry (Index 13)
-             (Term 5)
-             NoValue
-             (LeaderIssuer (LeaderId node0))
-             genesisHash
-  )
-
 

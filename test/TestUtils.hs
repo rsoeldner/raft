@@ -5,6 +5,7 @@ module TestUtils where
 
 import Protolude
 import qualified Data.Set as Set
+import qualified Data.Sequence as Seq
 import qualified Data.Map.Merge.Lazy as Merge
 
 import Raft

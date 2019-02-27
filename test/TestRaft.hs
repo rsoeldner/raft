@@ -21,5 +21,16 @@ import Raft.Types
 
 import RaftTestT
 import TestUtils
+import SampleEntries
+
+
+
+test_AEFollowerBehindN = testCase "Follower behind" $ do
+  testStates <- logMatchingTest
+    [ (node0, Term 4, entries)
+    , (node1, Term 2, Seq.take 2 entries)
+    , (node2, Term 4, entries)
+    ]
+  assertTestNodeStatesAllEqual (Term 5) testStates
 
 
