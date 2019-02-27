@@ -398,6 +398,7 @@ leaderElection' nid = do
 --------------------------------------------------------------------------------
 -- Test Harness and helpers
 --------------------------------------------------------------------------------
+type TestNodeStatesConfig =  [(NodeId, Term, Entries StoreCmd)]
 
 raftTestHarness
   :: ( Typeable m
@@ -432,7 +433,7 @@ raftTestHarness startingNodeStates raftTest =
     pure (tids, (eventChans, clientRespChans, testNodeStatesTVar))
   teardown = mapM_ killThread . fst
 
-initTestNodeStates :: [(NodeId, Term, Entries StoreCmd)] -> TestNodeStates
+initTestNodeStates :: TestNodeStatesConfig -> TestNodeStates
 initTestNodeStates startingValues =
   foldl adjustTestNodeStates emptyTestStates startingValues
  where
