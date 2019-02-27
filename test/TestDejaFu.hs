@@ -167,32 +167,41 @@ comprehensive _ _ = do
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
 logMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
-logMatchingTest startingStatesConfig desiredEndingState =
+logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
     , ("Correct", alwaysTrue correctResult)
     , ("Consistent", alwaysSame)
-    ] $  runTest
+    ] runTest
   where
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
       }
-
     correctResult :: Either Condition TestNodeStates -> Bool
     correctResult (Right testStates) =
-      ((testStates Map.! node0) == (testStates Map.! node1))
-        == ((testStates Map.! node1) == (testStates Map.! node2))
+      let allSame =
+            ((testStates Map.! node0) == (testStates Map.! node1))
+              == ((testStates Map.! node1) == (testStates Map.! node2))
+          correctTerm =
+            (currentTerm $ testNodePersistentState (testStates Map.! node0))
+              == desiredTerm
+          correctEntries = True
+      in  allSame && correctTerm && correctEntries
     correctResult (Left _) = False
-
     runTest :: ConcIO TestNodeStates
     runTest = do
        --let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 2, Seq.take 4 entries), (node2, Term 4, entries)]
        let startingNodeStates = initTestNodeStates startingStatesConfig
        (res, endingNodeStates) <- raftTestHarness startingNodeStates electLeaderAndWait
        pure endingNodeStates
-    electLeaderAndWait eventChans _ =
+    electLeaderAndWait eventChans _ = do
         leaderElection' node0
+        Right idx2 <- syncClientWrite node0 (Set "x" 7)
+        --leaderElection' node1
+        pure ()
+        --leaderElection' node1
+        --leaderElection' node2
 
 entries :: Entries StoreCmd
 entries = genEntries 4 3  -- 4 terms, each with 3 entries
