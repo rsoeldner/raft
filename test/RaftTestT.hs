@@ -10,19 +10,18 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
-
-
 module RaftTestT where
-
 import Protolude hiding
   (STM, TVar, TChan, newTChan, readMVar, readTChan, writeTChan, atomically, killThread, ThreadId, readTVar, writeTVar)
 
 import Data.Sequence (Seq(..), (><), dropWhileR, (!?))
 import qualified Data.Sequence as Seq
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as S
 import Numeric.Natural
+
+import System.Random (newStdGen)
+import Data.Time.Clock.System (getSystemTime)
 
 import Control.Monad.Fail
 import Control.Monad.Catch
@@ -30,19 +29,13 @@ import Control.Monad.Conc.Class
 import Control.Concurrent.Classy.STM.TChan
 import Control.Concurrent.Classy.STM.TVar
 
-import Test.DejaFu hiding (get, ThreadId)
-import Test.DejaFu.Internal (Settings(..))
-import Test.DejaFu.Conc hiding (ThreadId)
-import Test.Tasty
+import Test.DejaFu.Conc (ConcIO)
 import Test.Tasty.HUnit
 
 import Raft
 import Raft.Client
 import Raft.Log
 import Raft.Monad
-
-import System.Random (mkStdGen, newStdGen)
-import Data.Time.Clock.System (getSystemTime)
 
 import TestUtils
 
@@ -105,10 +98,10 @@ newtype RaftTestT m a = RaftTestT {
 
 type RaftTestM = RaftTestT ConcIO
 
-deriving newtype instance MonadThrow m => MonadThrow (RaftTestT m)
-deriving newtype instance MonadCatch m => MonadCatch (RaftTestT m)
-deriving newtype instance MonadMask m => MonadMask (RaftTestT m)
-deriving newtype instance MonadConc m => MonadConc (RaftTestT m)
+deriving instance MonadThrow m => MonadThrow (RaftTestT m)
+deriving instance MonadCatch m => MonadCatch (RaftTestT m)
+deriving instance MonadMask m => MonadMask (RaftTestT m)
+deriving instance MonadConc m => MonadConc (RaftTestT m)
 
 runRaftTestT :: Monad m => TestNodeEnv m -> RaftTestT m a -> m a
 runRaftTestT testEnv =
@@ -305,7 +298,7 @@ runTestNode
      )
   => TestNodeEnv m
   -> m ()
-runTestNode testEnv = do
+runTestNode testEnv =
     runRaftTestT testEnv $
       runRaftT initRaftNodeState raftEnv $
         handleEventLoop (mempty :: Store)
@@ -397,10 +390,9 @@ leaderElection' nid = do
 --------------------------------------------------------------------------------
 -- Test Harness and helpers
 --------------------------------------------------------------------------------
---
+
 type TestNodeStatesConfig =  [(NodeId, Term, Entries StoreCmd)]
 
--- Spawn 3 nodes
 withRaftTestNodes
   :: ( Typeable m
      , MonadConc m
@@ -431,7 +423,8 @@ withRaftTestNodes startingNodeStates raftTest =
     pure (tids, (eventChans, clientRespChans, testNodeStatesTVar))
   teardown = mapM_ killThread . fst
 
--- Given starting entries and terms for the network, and entries
+-- Given starting entries and terms for the nodes
+-- return nodes ending states after a leader election and delay
 logMatchingTest
   :: ( Typeable m
      , MonadConc m
@@ -442,18 +435,17 @@ logMatchingTest
      )
   => TestNodeStatesConfig -> m TestNodeStates
 logMatchingTest startingStatesConfig = do
-   let startingNodeStates = initTestNodeStates startingStatesConfig
+   let startingNodeStates = initTestStates startingStatesConfig
    (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
       leaderElection' node0
       liftIO $ Protolude.threadDelay 50000
    pure endingNodeStates
 
-
-initTestNodeStates :: TestNodeStatesConfig -> TestNodeStates
-initTestNodeStates startingValues =
-  foldl adjustTestNodeStates emptyTestStates startingValues
+initTestStates :: TestNodeStatesConfig -> TestNodeStates
+initTestStates startingValues =
+  foldl adjustTestStates emptyTestStates startingValues
  where
-  adjustTestNodeStates nodeState (node, term, entries) =
+  adjustTestStates nodeState (node, term, entries) =
     Map.adjust (adjustSingle entries term) node nodeState
 
   adjustSingle
