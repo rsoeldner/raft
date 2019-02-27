@@ -385,7 +385,6 @@ clientReadRespChan = do
   clientRespChan <- lift (asks testClientEnvRespChan)
   lift $ lift $ atomically $ readTChan clientRespChan
 
-
 leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> RaftTestClientT m Store
 leaderElection' nid = do
     eventChans <- lift $ asks testClientEnvNodeEventChans
@@ -398,8 +397,10 @@ leaderElection' nid = do
 --------------------------------------------------------------------------------
 -- Test Harness and helpers
 --------------------------------------------------------------------------------
+--
 type TestNodeStatesConfig =  [(NodeId, Term, Entries StoreCmd)]
 
+-- Spawn 3 nodes
 raftTestHarness
   :: ( Typeable m
      , MonadConc m
@@ -409,16 +410,13 @@ raftTestHarness
      , MonadRaftChan StoreCmd m
      )
   => TestNodeStates
-  -> (  TestEventChans m
-     -> TVar (STM m) TestNodeStates
-     -> RaftTestClientT m a
-     )
-   -> m (a, TestNodeStates)
+  -> RaftTestClientT m a
+  -> m (a, TestNodeStates)
 raftTestHarness startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
     $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) -> do
         let Just client0RespChan = Map.lookup client0 clientRespChans
-        res <- runRaftTestClientT client0 client0RespChan eventChans $ raftTest eventChans testNodeStatesTVar
+        res <- runRaftTestClientT client0 client0RespChan eventChans raftTest
 
         testStates <- readTVarConc testNodeStatesTVar
         pure (res, testStates)

@@ -63,7 +63,7 @@ test_concurrency =
 
 testConcurrentProps
   :: (Eq a, Show a)
-  => (TestEventChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> RaftTestClientT ConcIO a)
+  => RaftTestClientT ConcIO a
   -> a
   -> TestTree
 testConcurrentProps test expected =
@@ -80,17 +80,13 @@ testConcurrentProps test expected =
 leaderElection
   :: (MonadConc m, MonadIO m, MonadFail m)
   => NodeId
-  -> TestEventChans m
-  -> TVar (STM m) TestNodeStates
   -> RaftTestClientT m Store
-leaderElection nid eventChans testNodeStatesTVar = leaderElection' nid
+leaderElection nid = leaderElection' nid
 
 incrValue, multIncrValue
   :: (MonadConc m, MonadIO m, MonadFail m)
-  => TestEventChans m
-  -> TVar (STM m) TestNodeStates
-  -> RaftTestClientT m (Store, Index)
-incrValue _ _ = do
+  => RaftTestClientT m (Store, Index)
+incrValue = do
   leaderElection' node0
   Right idx <- do
     syncClientWrite node0 (Set "x" 41)
@@ -98,7 +94,7 @@ incrValue _ _ = do
   Right store <- syncClientRead node0
   pure (store, idx)
 
-multIncrValue _ _ = do
+multIncrValue = do
     leaderElection' node0
     syncClientWrite node0 (Set "x" 0)
     Right idx <-
@@ -109,19 +105,17 @@ multIncrValue _ _ = do
 
 leaderRedirect, followerRedirNoLeader, followerRedirLeader, newLeaderElection
   :: (MonadConc m, MonadIO m, MonadFail m)
-  => TestEventChans m
-  -> TVar (STM m) TestNodeStates
-  -> RaftTestClientT m CurrentLeader
-leaderRedirect _ _ = do
+  => RaftTestClientT m CurrentLeader
+leaderRedirect = do
     Left resp <- syncClientWrite node1 (Set "x" 42)
     pure resp
 
 followerRedirNoLeader = leaderRedirect
-followerRedirLeader eventChans testNodeStatesTVar = do
+followerRedirLeader = do
     leaderElection' node0
-    leaderRedirect eventChans testNodeStatesTVar
+    leaderRedirect
 
-newLeaderElection eventChans _ = do
+newLeaderElection = do
     leaderElection' node0
     leaderElection' node1
     leaderElection' node2
@@ -129,8 +123,8 @@ newLeaderElection eventChans _ = do
     Left ldr <- syncClientRead node0
     pure ldr
 
-comprehensive :: TestEventChans ConcIO -> TVar (STM ConcIO) TestNodeStates -> RaftTestClientT ConcIO (Index, Store, CurrentLeader)
-comprehensive _ _ = do
+comprehensive :: RaftTestClientT ConcIO (Index, Store, CurrentLeader)
+comprehensive = do
     leaderElection' node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
@@ -193,7 +187,7 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
     runTest :: ConcIO TestNodeStates
     runTest = do
        let startingNodeStates = initTestNodeStates startingStatesConfig
-       (res, endingNodeStates) <- raftTestHarness startingNodeStates $ \_ _ -> do
+       (res, endingNodeStates) <- raftTestHarness startingNodeStates $ do
           leaderElection' node0
        pure endingNodeStates
 
