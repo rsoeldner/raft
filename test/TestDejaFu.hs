@@ -193,6 +193,17 @@ test_AEFollowerBehind = dejaFuLogMatchingTest
   ]
   expectedStates
 
+test_AEFollowerBehindN = testCase "as" $ do
+  testStates <- logMatchingTest
+    [ (node0, Term 4, entries)
+    , (node1, Term 2, Seq.take 2 entries)
+    , (node2, Term 4, entries)
+    ]
+  assertEqual "Ending states don't match" (testStates Map.! node0) (testStates Map.! node1)
+  assertEqual "Ending states don't match" (testStates Map.! node1) (testStates Map.! node2)
+
+
+
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
   --, (node1, Term 2, entriesMutated)
