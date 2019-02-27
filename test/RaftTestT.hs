@@ -478,3 +478,17 @@ genEntries numTerms numEntriesPerTerm =
                      (LeaderIssuer (LeaderId node0))
                      genesisHash
 
+-- TODO could be better named and implemented ( not over just 3 nodes )
+assertTestNodeStatesAllEqual :: Term -> TestNodeStates -> Assertion
+assertTestNodeStatesAllEqual term testStates = do
+  assertEqual "Ending states don't match"
+    (testStates Map.! node0)
+    (testStates Map.! node1)
+  assertEqual "Ending states don't match"
+    (testStates Map.! node1)
+    (testStates Map.! node2)
+  assertEqual "Ending states don't match"
+    (currentTerm (testNodePersistentState (testStates Map.! node0)))
+    term
+
+

@@ -199,17 +199,7 @@ test_AEFollowerBehindN = testCase "Follower behind" $ do
     , (node1, Term 2, Seq.take 2 entries)
     , (node2, Term 4, entries)
     ]
-
-  assertEqual "Ending states don't match"
-    (testStates Map.! node0)
-    (testStates Map.! node1)
-  assertEqual "Ending states don't match"
-    (testStates Map.! node1)
-    (testStates Map.! node2)
-  assertEqual "Ending states don't match"
-    (currentTerm (testNodePersistentState (testStates Map.! node0)))
-    (Term 5)
-
+  assertTestNodeStatesAllEqual (Term 5) testStates
 
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
