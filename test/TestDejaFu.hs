@@ -186,7 +186,7 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
           correctTerm =
             (currentTerm $ testNodePersistentState (testStates Map.! node0))
               == desiredTerm
-          correctEntries = True
+          correctEntries = testNodeLog (testStates Map.! node0) ==  desiredEntries
       in  allSame && correctTerm && correctEntries
     correctResult (Left _) = False
     runTest :: ConcIO TestNodeStates
@@ -197,12 +197,9 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
        pure endingNodeStates
     electLeaderAndWait eventChans _ = do
         leaderElection' node0
-        Right idx2 <- syncClientWrite node0 (Set "x" 7)
-        --leaderElection' node1
         pure ()
-        --leaderElection' node1
-        --leaderElection' node2
 
+-- Test Fixtures
 entries :: Entries StoreCmd
 entries = genEntries 4 3  -- 4 terms, each with 3 entries
 
@@ -216,10 +213,21 @@ entriesMutated = fmap
   )
   entries
 
+expectedStates =
+  ( Term 5
+  , entries
+    Seq.|> Entry (Index 13)
+             (Term 5)
+             NoValue
+             (LeaderIssuer (LeaderId node0))
+             genesisHash
+  )
+
 test_AEFollowerBehind = logMatchingTest
   [ (node0, Term 4, entries)
   , (node1, Term 2, Seq.take 4 entries)
   , (node2, Term 4, entries)
   ]
-  (Term 5, entries)
+  expectedStates
+
 
