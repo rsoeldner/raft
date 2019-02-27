@@ -431,6 +431,24 @@ withRaftTestNodes startingNodeStates raftTest =
     pure (tids, (eventChans, clientRespChans, testNodeStatesTVar))
   teardown = mapM_ killThread . fst
 
+-- Given starting entries and terms for the network, and entries
+logMatchingTest
+  :: ( Typeable m
+     , MonadConc m
+     , MonadIO m
+     , MonadRaftFork m
+     , MonadFail m
+     , MonadRaftChan StoreCmd m
+     )
+  => TestNodeStatesConfig -> m TestNodeStates
+logMatchingTest startingStatesConfig = do
+   let startingNodeStates = initTestNodeStates startingStatesConfig
+   (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
+      leaderElection' node0
+      liftIO $ Protolude.threadDelay 50000
+   pure endingNodeStates
+
+
 initTestNodeStates :: TestNodeStatesConfig -> TestNodeStates
 initTestNodeStates startingValues =
   foldl adjustTestNodeStates emptyTestStates startingValues
@@ -459,15 +477,4 @@ genEntries numTerms numEntriesPerTerm =
                      NoValue
                      (LeaderIssuer (LeaderId node0))
                      genesisHash
-
-
-assertTestNodeStatesAllEqual :: TestNodeStates -> Assertion
-assertTestNodeStatesAllEqual testStates = do
-    -- TODO don't hardcode to just 3 nodes!!!
-    assertEqual "Ending states don't match" (testStates Map.! node0) (testStates Map.! node1)
-    assertEqual "Ending states don't match" (testStates Map.! node1) (testStates Map.! node2)
-
-
-
-
 

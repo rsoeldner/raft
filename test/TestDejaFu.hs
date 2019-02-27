@@ -161,22 +161,15 @@ comprehensive = do
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
 -- ( TODO not testing this completely yet )
-logMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
-logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
+dejaFuLogMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
+dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
     , ("Correct", alwaysTrue correctResult)
     , ("Consistent", alwaysSame)
-    ] runTest
+    ] $ logMatchingTest startingStatesConfig
   where
-    runTest :: ConcIO TestNodeStates
-    runTest = do
-       let startingNodeStates = initTestNodeStates startingStatesConfig
-       (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
-          leaderElection' node0
-       pure endingNodeStates
-
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
       }
@@ -193,7 +186,7 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
     correctResult (Left _) = False
 
 
-test_AEFollowerBehind = logMatchingTest
+test_AEFollowerBehind = dejaFuLogMatchingTest
   [ (node0, Term 4, entries)
   , (node1, Term 2, Seq.take 2 entries)
   , (node2, Term 4, entries)
