@@ -166,18 +166,25 @@ comprehensive _ _ = do
 -- See Figure 3 pg 5 in Raft paper
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
-logMatchingTest:: TestNodeStatesConfig -> TestNodeState -> TestTree
+logMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
 logMatchingTest startingStatesConfig desiredEndingState =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
-    --, ("Correct", alwaysTrue (== desiredEndingState))
+    , ("Correct", alwaysTrue correctResult)
     , ("Consistent", alwaysSame)
     ] $  runTest
   where
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
       }
+
+    correctResult :: Either Condition TestNodeStates -> Bool
+    correctResult (Right testStates) =
+      ((testStates Map.! node0) == (testStates Map.! node1))
+        == ((testStates Map.! node1) == (testStates Map.! node2))
+    correctResult (Left _) = False
+
     runTest :: ConcIO TestNodeStates
     runTest = do
        --let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 2, Seq.take 4 entries), (node2, Term 4, entries)]
@@ -187,12 +194,10 @@ logMatchingTest startingStatesConfig desiredEndingState =
     electLeaderAndWait eventChans _ =
         leaderElection' node0
 
-test_AEFollowerBehind = eventualConsistencyTest [(node0, Term 4, entries), (node1, Term 2, Seq.take 4 entries), (node2, Term 4, entries)] undefined
-
-
-entries, entriesMutated :: Entries StoreCmd
+entries :: Entries StoreCmd
 entries = genEntries 4 3  -- 4 terms, each with 3 entries
 
+entriesMutated :: Entries StoreCmd
 entriesMutated = fmap
   (\e -> if entryIndex e == Index 12
     then e { entryIssuer = LeaderIssuer (LeaderId node1)
@@ -202,4 +207,10 @@ entriesMutated = fmap
   )
   entries
 
+test_AEFollowerBehind = logMatchingTest
+  [ (node0, Term 4, entries)
+  , (node1, Term 2, Seq.take 4 entries)
+  , (node2, Term 4, entries)
+  ]
+  (Term 5, entries)
 
