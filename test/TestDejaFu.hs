@@ -183,23 +183,37 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
       let allSame =
             ((testStates Map.! node0) == (testStates Map.! node1))
               == ((testStates Map.! node1) == (testStates Map.! node2))
+          sampleNode = (testStates Map.! node0)
           correctTerm =
-            (currentTerm $ testNodePersistentState (testStates Map.! node0))
-              == desiredTerm
-          correctEntries = testNodeLog (testStates Map.! node0) ==  desiredEntries
+            currentTerm (testNodePersistentState sampleNode) == desiredTerm
+          correctEntries = testNodeLog sampleNode == desiredEntries
       in  allSame && correctTerm && correctEntries
     correctResult (Left _) = False
+
     runTest :: ConcIO TestNodeStates
     runTest = do
-       --let startingNodeStates =  initTestNodeStates [(node0, Term 4, entries), (node1, Term 2, Seq.take 4 entries), (node2, Term 4, entries)]
        let startingNodeStates = initTestNodeStates startingStatesConfig
-       (res, endingNodeStates) <- raftTestHarness startingNodeStates electLeaderAndWait
+       (res, endingNodeStates) <- raftTestHarness startingNodeStates $ \_ _ -> do
+          leaderElection' node0
        pure endingNodeStates
-    electLeaderAndWait eventChans _ = do
-        leaderElection' node0
-        pure ()
 
--- Test Fixtures
+test_AEFollowerBehind = logMatchingTest
+  [ (node0, Term 4, entries)
+  , (node1, Term 4,  entries)
+  , (node2, Term 4, entries)
+  ]
+  expectedStates
+
+--test_AEFollowerConflict = logMatchingTest
+  --[ (node0, Term 4, entries)
+  --, (node1, Term 2, entriesMutated)
+  --, (node2, Term 4, entries)
+  --]
+  --expectedStates
+
+--------------------------------------------------------------------------------
+-- Sample entries
+--------------------------------------------------------------------------------
 entries :: Entries StoreCmd
 entries = genEntries 4 3  -- 4 terms, each with 3 entries
 
@@ -222,12 +236,5 @@ expectedStates =
              (LeaderIssuer (LeaderId node0))
              genesisHash
   )
-
-test_AEFollowerBehind = logMatchingTest
-  [ (node0, Term 4, entries)
-  , (node1, Term 2, Seq.take 4 entries)
-  , (node2, Term 4, entries)
-  ]
-  expectedStates
 
 
