@@ -401,7 +401,7 @@ leaderElection' nid = do
 type TestNodeStatesConfig =  [(NodeId, Term, Entries StoreCmd)]
 
 -- Spawn 3 nodes
-raftTestHarness
+withRaftTestNodes
   :: ( Typeable m
      , MonadConc m
      , MonadIO m
@@ -412,7 +412,7 @@ raftTestHarness
   => TestNodeStates
   -> RaftTestClientT m a
   -> m (a, TestNodeStates)
-raftTestHarness startingNodeStates raftTest =
+withRaftTestNodes startingNodeStates raftTest =
   Control.Monad.Catch.bracket setup teardown
     $ \(tids, (eventChans, clientRespChans, testNodeStatesTVar)) -> do
         let Just client0RespChan = Map.lookup client0 clientRespChans

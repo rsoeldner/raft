@@ -71,7 +71,7 @@ testConcurrentProps test expected =
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
     , ("Success", alwaysTrue (== Right expected))
-    ] $ fst <$> raftTestHarness emptyTestStates test
+    ] $ fst <$> withRaftTestNodes emptyTestStates test
   where
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
@@ -160,6 +160,7 @@ comprehensive = do
 -- See Figure 3 pg 5 in Raft paper
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
+-- ( TODO not testing this completely yet )
 logMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
 logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
@@ -169,6 +170,13 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
     , ("Consistent", alwaysSame)
     ] runTest
   where
+    runTest :: ConcIO TestNodeStates
+    runTest = do
+       let startingNodeStates = initTestNodeStates startingStatesConfig
+       (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
+          leaderElection' node0
+       pure endingNodeStates
+
     settings = defaultSettings
       { _way = randomly (mkStdGen 42) 100
       }
@@ -184,16 +192,10 @@ logMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
       in  allSame && correctTerm && correctEntries
     correctResult (Left _) = False
 
-    runTest :: ConcIO TestNodeStates
-    runTest = do
-       let startingNodeStates = initTestNodeStates startingStatesConfig
-       (res, endingNodeStates) <- raftTestHarness startingNodeStates $ do
-          leaderElection' node0
-       pure endingNodeStates
 
 test_AEFollowerBehind = logMatchingTest
   [ (node0, Term 4, entries)
-  , (node1, Term 4,  entries)
+  , (node1, Term 2, Seq.take 2 entries)
   , (node2, Term 4, entries)
   ]
   expectedStates
