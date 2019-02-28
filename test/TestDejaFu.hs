@@ -172,7 +172,7 @@ dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
     ] $ logMatchingTest startingStatesConfig
   where
     settings = defaultSettings
-      { _way = randomly (mkStdGen 42) 100
+      { _way = randomly (mkStdGen 42) 10
       }
     correctResult :: Either Condition TestNodeStates -> Bool
     correctResult (Right testStates) =
@@ -193,7 +193,6 @@ test_AEFollowerBehind = dejaFuLogMatchingTest
   , (node2, Term 4, entries)
   ]
   expectedStates
-
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
   --, (node1, Term 2, entriesMutated)

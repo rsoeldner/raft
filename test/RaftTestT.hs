@@ -439,10 +439,13 @@ logMatchingTest startingStatesConfig = do
    (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
       leaderElection' node0
       eventChans <- lift $ asks testClientEnvNodeEventChans
-      let e = (eventChans Map.! node0)
 
-      heartbeat e
-      liftIO $ Protolude.threadDelay 50000
+      syncClientWrite node0 (Set "x" 41)
+      Right _ <- syncClientRead node0
+      --lift $ do
+        --heartbeat  (eventChans Map.! node1)
+        --heartbeat  (eventChans Map.! node2)
+      liftIO $ Protolude.threadDelay 1000000
 
    pure endingNodeStates
 
