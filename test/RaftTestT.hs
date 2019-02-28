@@ -305,7 +305,8 @@ runTestNode testEnv =
   where
     nid = configNodeId (testRaftNodeConfig testEnv)
     Just eventChan = Map.lookup nid (testNodeEventChans testEnv)
-    raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
+    raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) (LogCtx (LogStdout) Info)
+    --raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) (LogCtx (LogFile ("/tmp/raft-log-" ++ show nid)) Info)
     dummyTimer = pure ()
 
 forkTestNodes
