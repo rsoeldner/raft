@@ -426,7 +426,7 @@ withRaftTestNodes startingNodeStates raftTest =
 -- Given starting entries and terms for the nodes
 -- return nodes ending states after a leader election and delay
 logMatchingTest
-  :: ( Typeable m
+  :: forall m. ( Typeable m
      , MonadConc m
      , MonadIO m
      , MonadRaftFork m
@@ -438,7 +438,12 @@ logMatchingTest startingStatesConfig = do
    let startingNodeStates = initTestStates startingStatesConfig
    (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
       leaderElection' node0
+      eventChans <- lift $ asks testClientEnvNodeEventChans
+      let e = (eventChans Map.! node0)
+
+      heartbeat e
       liftIO $ Protolude.threadDelay 50000
+
    pure endingNodeStates
 
 initTestStates :: TestNodeStatesConfig -> TestNodeStates
