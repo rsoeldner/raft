@@ -103,3 +103,5 @@ printIfNodes :: (Show nId, Eq nId) => [nId] -> nId -> [Char] -> IO ()
 printIfNodes nIds nId' msg =
   when (nId' `elem` nIds) $
     print $ show nId' ++ " " ++ msg
+
+

@@ -442,11 +442,13 @@ logMatchingTest startingStatesConfig = do
       eventChans <- lift $ asks testClientEnvNodeEventChans
 
       syncClientWrite node0 (Set "x" 41)
+      lift $ do
+        heartbeat  (eventChans Map.! node0)
+        heartbeat  (eventChans Map.! node1)
+        heartbeat  (eventChans Map.! node2)
+        heartbeat  (eventChans Map.! node3)
       Right _ <- syncClientRead node0
-      --lift $ do
-        --heartbeat  (eventChans Map.! node1)
-        --heartbeat  (eventChans Map.! node2)
-      liftIO $ Protolude.threadDelay 1000000
+      liftIO $ Protolude.threadDelay 10000
 
    pure endingNodeStates
 

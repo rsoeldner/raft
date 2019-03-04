@@ -47,7 +47,7 @@ import Raft.Client
 import Raft.Log
 import Raft.Monad
 
-
+import Unsafe
 test_concurrency :: [TestTree]
 test_concurrency =
     [ testGroup "Leader Election" [ testConcurrentProps (leaderElection node0) mempty ]
@@ -167,25 +167,32 @@ dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
-    , ("Correct", alwaysTrue correctResult)
+    --, ("Correct", alwaysTrue correctResult)
     , ("Consistent", alwaysSame)
     ] $ logMatchingTest startingStatesConfig
   where
     settings = defaultSettings
-      { _way = randomly (mkStdGen 42) 10
+      { _way = randomly (mkStdGen 42) 50
       }
     correctResult :: Either Condition TestNodeStates -> Bool
     correctResult (Right testStates) =
       let allSame =
-            ((testStates Map.! node0) == (testStates Map.! node1))
+            traceShowId $ ((testStates Map.! node0) == (testStates Map.! node1))
               == ((testStates Map.! node1) == (testStates Map.! node2))
           sampleNode = (testStates Map.! node0)
           correctTerm =
-            currentTerm (testNodePersistentState sampleNode) == desiredTerm
+              currentTerm (testNodePersistentState sampleNode) == desiredTerm
           correctEntries = testNodeLog sampleNode == desiredEntries
-      in  allSame && correctTerm && correctEntries
+      in  traceShow desiredEntries $ allSame && traceShow ("correctEntries" ++ show correctEntries)  correctTerm && traceShow ("correctTerm" ++ show correctTerm) correctEntries
     correctResult (Left _) = False
 
+test_AEFollower = dejaFuLogMatchingTest
+  [ (node0, Term 4, entries)
+  , (node1, Term 4, entries)
+  , (node2, Term 4, entries)
+  , (node3, Term 4, entries)
+  ]
+  expectedStates
 
 test_AEFollowerBehind = dejaFuLogMatchingTest
   [ (node0, Term 4, entries)
@@ -194,6 +201,9 @@ test_AEFollowerBehind = dejaFuLogMatchingTest
   , (node3, Term 4, entries)
   ]
   expectedStates
+
+test_AEFollowerNoLogs = dejaFuLogMatchingTest [] expectedStates
+
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
   --, (node1, Term 2, entriesMutated)
