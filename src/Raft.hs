@@ -353,8 +353,9 @@ handleAction action = do
   logDebug $ "Handling [Action]: " <> show action
   case action of
     SendRPC nid sendRpcAction -> do
-      rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
-      lift (sendRPC nid rpcMsg)
+      void . raftFork (CustomThreadRole "Send RPC") $ do
+        rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
+        lift (sendRPC nid rpcMsg)
     SendRPCs rpcMap ->
       flip mapM_ (Map.toList rpcMap) $ \(nid, sendRpcAction) ->
         raftFork (CustomThreadRole "Send RPC") $ do
@@ -400,9 +401,9 @@ handleAction action = do
 
     respondToClient :: ClientId -> ClientRespSpec sm v -> RaftT v m ()
     respondToClient cid crs = do
-      clientResp <- mkClientResp crs
-      -- TODO log failure if sendClient fails
-      void $ raftFork (CustomThreadRole "Respond to Client") $
+      void $ raftFork (CustomThreadRole "Respond to Client") $ do
+        clientResp <- mkClientResp crs
+        -- TODO log failure if sendClient fails
         lift (sendClient cid clientResp)
 
     mkClientResp :: ClientRespSpec sm v -> RaftT v m (ClientResponse sm v)
