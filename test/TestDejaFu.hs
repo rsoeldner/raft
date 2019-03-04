@@ -37,7 +37,7 @@ import Test.Tasty.DejaFu hiding (get)
 
 import System.Random (mkStdGen, newStdGen)
 import Data.Time.Clock.System (getSystemTime)
-
+import Data.List
 import TestUtils
 import RaftTestT
 import SampleEntries
@@ -84,7 +84,7 @@ leaderElection
   -> RaftTestClientT m Store
 leaderElection nid = leaderElection' nid
 
-incrValue, multIncrValue
+incrValue
   :: (MonadConc m, MonadIO m, MonadFail m)
   => RaftTestClientT m (Store, Index)
 incrValue = do
@@ -94,7 +94,9 @@ incrValue = do
     syncClientWrite node0 (Incr "x")
   Right store <- syncClientRead node0
   pure (store, idx)
-
+multIncrValue
+  :: (MonadConc m, MonadIO m, MonadFail m)
+  => RaftTestClientT m (Store, Index)
 multIncrValue = do
     leaderElection' node0
     syncClientWrite node0 (Set "x" 0)
@@ -162,7 +164,7 @@ comprehensive = do
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
 -- ( TODO not testing this completely yet )
-dejaFuLogMatchingTest:: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
+dejaFuLogMatchingTest :: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
 dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
@@ -186,14 +188,16 @@ dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
       in  traceShow desiredEntries $ allSame && traceShow ("correctEntries" ++ show correctEntries)  correctTerm && traceShow ("correctTerm" ++ show correctTerm) correctEntries
     correctResult (Left _) = False
 
-test_AEFollower = dejaFuLogMatchingTest
+test_AEFollower :: TestTree
+test_AEFollower = testGroup "test_AEFollower" [dejaFuLogMatchingTest
   [ (node0, Term 4, entries)
   , (node1, Term 4, entries)
   , (node2, Term 4, entries)
   , (node3, Term 4, entries)
   ]
-  expectedStates
+  expectedStates]
 
+test_AEFollowerBehind :: TestTree
 test_AEFollowerBehind = dejaFuLogMatchingTest
   [ (node0, Term 4, entries)
   , (node1, Term 2, Seq.take 2 entries)
@@ -202,6 +206,7 @@ test_AEFollowerBehind = dejaFuLogMatchingTest
   ]
   expectedStates
 
+test_AEFollowerNoLogs :: TestTree
 test_AEFollowerNoLogs = dejaFuLogMatchingTest [] expectedStates
 
 --test_AEFollowerConflict = logMatchingTest
