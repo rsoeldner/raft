@@ -424,34 +424,6 @@ withRaftTestNodes startingNodeStates raftTest =
     pure (tids, (eventChans, clientRespChans, testNodeStatesTVar))
   teardown = mapM_ killThread . fst
 
--- Given starting entries and terms for the nodes
--- return nodes ending states after a leader election and delay
-logMatchingTest
-  :: forall m. ( Typeable m
-     , MonadConc m
-     , MonadIO m
-     , MonadRaftFork m
-     , MonadFail m
-     , MonadRaftChan StoreCmd m
-     )
-  => TestNodeStatesConfig -> m TestNodeStates
-logMatchingTest startingStatesConfig = do
-   let startingNodeStates = initTestStates startingStatesConfig
-   (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
-      leaderElection' node0
-      eventChans <- lift $ asks testClientEnvNodeEventChans
-
-      syncClientWrite node0 (Set "x" 41)
-      lift $ do
-        heartbeat  (eventChans Map.! node0)
-        heartbeat  (eventChans Map.! node1)
-        heartbeat  (eventChans Map.! node2)
-        heartbeat  (eventChans Map.! node3)
-      Right _ <- syncClientRead node0
-      liftIO $ Protolude.threadDelay 10000
-
-   pure endingNodeStates
-
 initTestStates :: TestNodeStatesConfig -> TestNodeStates
 initTestStates startingValues =
   foldl adjustTestStates emptyTestStates startingValues
@@ -468,30 +440,3 @@ initTestStates startingValues =
       , votedFor    = Nothing
       }
     }
-
-genEntries :: Integer -> Integer -> Entries StoreCmd
-genEntries numTerms numEntriesPerTerm =
-  Seq.fromList $ fmap gen (zip indexes terms)
- where
-  indexes = [1 .. numTerms * numEntriesPerTerm]
-  terms = concatMap (replicate (fromInteger numEntriesPerTerm)) [1 .. numTerms]
-  gen (i, t) = Entry (Index (fromInteger i))
-                     (Term (fromInteger t))
-                     NoValue
-                     (LeaderIssuer (LeaderId node0))
-                     genesisHash
-
--- TODO could be better named and implemented ( not over just 3 nodes )
-assertTestNodeStatesAllEqual :: Term -> TestNodeStates -> Assertion
-assertTestNodeStatesAllEqual term testStates = do
-  assertEqual "Ending states don't match"
-    (testStates Map.! node0)
-    (testStates Map.! node1)
-  assertEqual "Ending states don't match"
-    (testStates Map.! node1)
-    (testStates Map.! node2)
-  assertEqual "Ending states don't match"
-    (currentTerm (testNodePersistentState (testStates Map.! node0)))
-    term
-
-

@@ -40,14 +40,13 @@ import Data.Time.Clock.System (getSystemTime)
 import Data.List
 import TestUtils
 import RaftTestT
-import SampleEntries
+import qualified SampleEntries
 
 import Raft
 import Raft.Client
 import Raft.Log
 import Raft.Monad
 
-import Unsafe
 test_concurrency :: [TestTree]
 test_concurrency =
     [ testGroup "Leader Election" [ testConcurrentProps (leaderElection node0) mempty ]
@@ -79,14 +78,12 @@ testConcurrentProps test expected =
       }
 
 leaderElection
-  :: (MonadConc m, MonadIO m, MonadFail m)
-  => NodeId
-  -> RaftTestClientT m Store
+  :: NodeId
+  -> RaftTestClientM Store
 leaderElection nid = leaderElection' nid
 
 incrValue
-  :: (MonadConc m, MonadIO m, MonadFail m)
-  => RaftTestClientT m (Store, Index)
+  :: RaftTestClientM (Store, Index)
 incrValue = do
   leaderElection' node0
   Right idx <- do
@@ -94,9 +91,8 @@ incrValue = do
     syncClientWrite node0 (Incr "x")
   Right store <- syncClientRead node0
   pure (store, idx)
-multIncrValue
-  :: (MonadConc m, MonadIO m, MonadFail m)
-  => RaftTestClientT m (Store, Index)
+
+multIncrValue :: RaftTestClientM (Store, Index)
 multIncrValue = do
     leaderElection' node0
     syncClientWrite node0 (Set "x" 0)
@@ -106,18 +102,20 @@ multIncrValue = do
     store <- pollForReadResponse node0
     pure (store, idx)
 
-leaderRedirect, followerRedirNoLeader, followerRedirLeader, newLeaderElection
-  :: (MonadConc m, MonadIO m, MonadFail m)
-  => RaftTestClientT m CurrentLeader
+leaderRedirect :: RaftTestClientM CurrentLeader
 leaderRedirect = do
     Left resp <- syncClientWrite node1 (Set "x" 42)
     pure resp
 
+followerRedirNoLeader :: RaftTestClientM CurrentLeader
 followerRedirNoLeader = leaderRedirect
+
+followerRedirLeader :: RaftTestClientM CurrentLeader
 followerRedirLeader = do
     leaderElection' node0
     leaderRedirect
 
+newLeaderElection :: RaftTestClientM CurrentLeader
 newLeaderElection = do
     leaderElection' node0
     leaderElection' node1
@@ -160,6 +158,27 @@ comprehensive = do
 
     pure (idx14, store, ldr)
 
+-- Given starting entries and terms for the nodes
+-- return nodes ending states after a leader election, sync read and write.
+logMatchingTest :: TestNodeStatesConfig -> ConcIO TestNodeStates
+logMatchingTest startingStatesConfig = do
+   let startingNodeStates = initTestStates startingStatesConfig
+   (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
+      leaderElection' node0
+      eventChans <- lift $ asks testClientEnvNodeEventChans
+
+      syncClientWrite node0 (Set "x" 41)
+      lift $ do
+        heartbeat  (eventChans Map.! node0)
+        heartbeat  (eventChans Map.! node1)
+        heartbeat  (eventChans Map.! node2)
+        heartbeat  (eventChans Map.! node3)
+      Right _ <- syncClientRead node0
+
+      pure ()
+   pure endingNodeStates
+
+
 -- See Figure 3 pg 5 in Raft paper
 -- if two logs contain an entry with the same index and term,
 -- then the logs are identical in all entries up through the given index
@@ -169,45 +188,28 @@ dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
   testDejafusWithSettings settings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
-    --, ("Correct", alwaysTrue correctResult)
-    , ("Consistent", alwaysSame)
+    , ("Correct", alwaysTrue correctResult)
     ] $ logMatchingTest startingStatesConfig
   where
     settings = defaultSettings
-      { _way = randomly (mkStdGen 42) 50
+      { _way = randomly (mkStdGen 42) 100
       }
     correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) =
-      let allSame =
-            traceShowId $ ((testStates Map.! node0) == (testStates Map.! node1))
-              == ((testStates Map.! node1) == (testStates Map.! node2))
-          sampleNode = (testStates Map.! node0)
-          correctTerm =
-              currentTerm (testNodePersistentState sampleNode) == desiredTerm
-          correctEntries = testNodeLog sampleNode == desiredEntries
-      in  traceShow desiredEntries $ allSame && traceShow ("correctEntries" ++ show correctEntries)  correctTerm && traceShow ("correctTerm" ++ show correctTerm) correctEntries
+    correctResult (Right testStates) = length (nub $ Map.elems testStates) <=  2
     correctResult (Left _) = False
 
 test_AEFollower :: TestTree
-test_AEFollower = testGroup "test_AEFollower" [dejaFuLogMatchingTest
-  [ (node0, Term 4, entries)
-  , (node1, Term 4, entries)
-  , (node2, Term 4, entries)
-  , (node3, Term 4, entries)
+test_AEFollower = dejaFuLogMatchingTest
+  [ (node0, Term 4, SampleEntries.entries)
+  , (node1, Term 4, SampleEntries.entries)
+  , (node2, Term 4, SampleEntries.entries)
+  , (node3, Term 4, SampleEntries.entries)
+  , (node4, Term 4, SampleEntries.entries)
   ]
-  expectedStates]
+  SampleEntries.expectedStates
 
-test_AEFollowerBehind :: TestTree
-test_AEFollowerBehind = dejaFuLogMatchingTest
-  [ (node0, Term 4, entries)
-  , (node1, Term 2, Seq.take 2 entries)
-  , (node2, Term 4, entries)
-  , (node3, Term 4, entries)
-  ]
-  expectedStates
-
-test_AEFollowerNoLogs :: TestTree
-test_AEFollowerNoLogs = dejaFuLogMatchingTest [] expectedStates
+--test_AEFollowerNoLogs :: TestTree
+--test_AEFollowerNoLogs = dejaFuLogMatchingTest [] expectedStates
 
 --test_AEFollowerConflict = logMatchingTest
   --[ (node0, Term 4, entries)
