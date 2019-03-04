@@ -38,13 +38,3 @@ entriesMutated = fmap
   )
   entries
 
-expectedStates =
-  ( Term 5
-  , entries
-    Seq.|> Entry (Index 13)
-                 (Term 5)
-                 NoValue
-                 (LeaderIssuer (LeaderId node0))
-                 genesisHash
-  )
-

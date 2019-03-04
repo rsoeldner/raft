@@ -21,7 +21,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Maybe as Maybe
 import qualified Data.Serialize as S
 import Numeric.Natural
-
+import Test.QuickCheck
 import Control.Monad.Fail
 import Control.Monad.Catch
 import Control.Monad.Conc.Class
@@ -47,6 +47,8 @@ import Raft.Client
 import Raft.Log
 import Raft.Monad
 
+dejaFuSettings = defaultSettings { _way = randomly (mkStdGen 42) 100 }
+
 test_concurrency :: [TestTree]
 test_concurrency =
     [ testGroup "Leader Election" [ testConcurrentProps (leaderElection node0) mempty ]
@@ -67,15 +69,11 @@ testConcurrentProps
   -> a
   -> TestTree
 testConcurrentProps test expected =
-  testDejafusWithSettings settings
+  testDejafusWithSettings dejaFuSettings
     [ ("No deadlocks", deadlocksNever)
     , ("No Exceptions", exceptionsNever)
     , ("Success", alwaysTrue (== Right expected))
     ] $ fst <$> withRaftTestNodes emptyTestStates test
-  where
-    settings = defaultSettings
-      { _way = randomly (mkStdGen 42) 100
-      }
 
 leaderElection
   :: NodeId
@@ -158,63 +156,56 @@ comprehensive = do
 
     pure (idx14, store, ldr)
 
--- Given starting entries and terms for the nodes
--- return nodes ending states after a leader election, sync read and write.
-logMatchingTest :: TestNodeStatesConfig -> ConcIO TestNodeStates
-logMatchingTest startingStatesConfig = do
-   let startingNodeStates = initTestStates startingStatesConfig
-   (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
-      leaderElection' node0
-      eventChans <- lift $ asks testClientEnvNodeEventChans
 
-      syncClientWrite node0 (Set "x" 41)
-      lift $ do
-        heartbeat  (eventChans Map.! node0)
-        heartbeat  (eventChans Map.! node1)
-        heartbeat  (eventChans Map.! node2)
-        heartbeat  (eventChans Map.! node3)
-      Right _ <- syncClientRead node0
-
-      pure ()
-   pure endingNodeStates
-
-
--- See Figure 3 pg 5 in Raft paper
--- if two logs contain an entry with the same index and term,
--- then the logs are identical in all entries up through the given index
--- ( TODO not testing this completely yet )
-dejaFuLogMatchingTest :: TestNodeStatesConfig -> (Term, Entries StoreCmd) -> TestTree
-dejaFuLogMatchingTest startingStatesConfig (desiredTerm, desiredEntries) =
-  testDejafusWithSettings settings
+-- | Check if the majority of the node states are equal after running the given RaftTestClientM
+-- program
+-- TODO hardcoded to running with 3 nodes
+majorityNodeStatesEqual :: RaftTestClientM a -> TestNodeStatesConfig -> TestTree
+majorityNodeStatesEqual clientTest startingStatesConfig  =
+  testDejafusWithSettings dejaFuSettings
     [ ("No deadlocks", deadlocksNever)
-    , ("No Exceptions", exceptionsNever)
+    , ("No exceptions", exceptionsNever)
     , ("Correct", alwaysTrue correctResult)
-    ] $ logMatchingTest startingStatesConfig
+    ] runTest
   where
-    settings = defaultSettings
-      { _way = randomly (mkStdGen 42) 100
-      }
+    runTest :: ConcIO TestNodeStates
+    runTest = do
+      let startingNodeStates = initTestStates startingStatesConfig
+      (res, endingNodeStates) <- withRaftTestNodes startingNodeStates clientTest
+      pure endingNodeStates
+
     correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) = length (nub $ Map.elems testStates) <=  2
+    correctResult (Right testStates) = length (nub $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
     correctResult (Left _) = False
 
+
 test_AEFollower :: TestTree
-test_AEFollower = dejaFuLogMatchingTest
+test_AEFollower = majorityNodeStatesEqual (leaderElection' node0)
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 4, SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
-  , (node3, Term 4, SampleEntries.entries)
-  , (node4, Term 4, SampleEntries.entries)
   ]
-  SampleEntries.expectedStates
 
---test_AEFollowerNoLogs :: TestTree
---test_AEFollowerNoLogs = dejaFuLogMatchingTest [] expectedStates
+test_AEFollowerBehindOneTerm :: TestTree
+test_AEFollowerBehindOneTerm = majorityNodeStatesEqual (leaderElection' node0)
+  [ (node0, Term 4, SampleEntries.entries)
+  , (node1, Term 3, Seq.take 10 SampleEntries.entries)
+  , (node2, Term 4, SampleEntries.entries)
+  ]
 
---test_AEFollowerConflict = logMatchingTest
-  --[ (node0, Term 4, entries)
-  --, (node1, Term 2, entriesMutated)
-  --, (node2, Term 4, entries)
-  --]
-  --expectedStates
+test_AEFollowerBehindMultipleTerms :: TestTree
+test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (leaderElection' node0)
+  [ (node0, Term 4, SampleEntries.entries)
+  , (node1, Term 2, Seq.take 5 SampleEntries.entries)
+  , (node2, Term 4, SampleEntries.entries)
+  ]
+
+--prop_AEFollowerBehind :: Small (Positive Integer) -> Small (Positive Integer) -> Bool
+--prop_AEFollowerBehind (Small (Positive numEntriesPerTerm)) numTerms = majorityNodeStatesEqual (leaderElection' node0)
+    --[ (node0, Term 4, entries)
+    --, (node1, Term 2, entries)
+    --, (node2, Term 4, entries)
+    --]
+  --where
+    --entries = SampleEntries.genEntries numEntriesPerTerm numTerms
 

@@ -35,21 +35,19 @@ getCommittedLogIndex (RaftNodeState (NodeFollowerState FollowerState{..})) = fsC
 getCommittedLogIndex (RaftNodeState (NodeCandidateState CandidateState{..})) = csCommitIndex
 getCommittedLogIndex (RaftNodeState (NodeLeaderState LeaderState{..})) = lsCommitIndex
 
-node0, node1, node2, node3, node4 :: NodeId
+node0, node1, node2 :: NodeId
 node0 = "node0"
 node1 = "node1"
 node2 = "node2"
-node3 = "node3"
-node4 = "node4"
 
 client0 :: ClientId
 client0 = ClientId "client0"
 
 nodeIds :: NodeIds
-nodeIds = Set.fromList [node0, node1, node2, node3, node4]
+nodeIds = Set.fromList [node0, node1, node2 ]
 
 testConfigs :: [RaftNodeConfig]
-testConfigs = [testConfig0, testConfig1, testConfig2, testConfig3, testConfig4]
+testConfigs = [testConfig0, testConfig1, testConfig2 ]
 
 msToMicroS :: Num n => n -> n
 msToMicroS = (1000 *)
@@ -80,21 +78,6 @@ testConfig2 = RaftNodeConfig
   , configStorageState = New
   }
 
-testConfig3 = RaftNodeConfig
-  { configNodeId = node3
-  , configNodeIds = nodeIds
-  , configElectionTimeout = pairMsToMicroS (150, 300)
-  , configHeartbeatTimeout = msToMicroS 50
-  , configStorageState = New
-  }
-
-testConfig4 = RaftNodeConfig
-  { configNodeId = node4
-  , configNodeIds = nodeIds
-  , configElectionTimeout = pairMsToMicroS (150, 300)
-  , configHeartbeatTimeout = msToMicroS 50
-  , configStorageState = New
-  }
 -- | Zip maps using function. Throws away items left and right
 zipMapWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
 zipMapWith f = Merge.merge Merge.dropMissing Merge.dropMissing (Merge.zipWithMatched (const f))
