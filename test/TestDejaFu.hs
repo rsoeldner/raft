@@ -80,8 +80,7 @@ leaderElection
   -> RaftTestClientM Store
 leaderElection nid = leaderElection' nid
 
-incrValue
-  :: RaftTestClientM (Store, Index)
+incrValue :: RaftTestClientM (Store, Index)
 incrValue = do
   leaderElection' node0
   Right idx <- do
@@ -175,7 +174,7 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
       pure endingNodeStates
 
     correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) = length (nub $ fmap testNodeLog $Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
+    correctResult (Right testStates) = length (nub $ fmap testNodeLog $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
     correctResult (Left _) = False
 
 
