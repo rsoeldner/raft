@@ -44,10 +44,10 @@ client0 :: ClientId
 client0 = ClientId "client0"
 
 nodeIds :: NodeIds
-nodeIds = Set.fromList [node0, node1, node2 ]
+nodeIds = Set.fromList [node0, node1, node2]
 
 testConfigs :: [RaftNodeConfig]
-testConfigs = [testConfig0, testConfig1, testConfig2 ]
+testConfigs = [testConfig0, testConfig1, testConfig2]
 
 msToMicroS :: Num n => n -> n
 msToMicroS = (1000 *)
@@ -95,5 +95,3 @@ printIfNodes :: (Show nId, Eq nId) => [nId] -> nId -> [Char] -> IO ()
 printIfNodes nIds nId' msg =
   when (nId' `elem` nIds) $
     print $ show nId' ++ " " ++ msg
-
-
