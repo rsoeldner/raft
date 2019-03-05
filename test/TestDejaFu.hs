@@ -170,30 +170,36 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
     runTest :: ConcIO TestNodeStates
     runTest = do
       let startingNodeStates = initTestStates startingStatesConfig
-      (res, endingNodeStates) <- withRaftTestNodes startingNodeStates clientTest
+      (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
+        leaderElection' node0
+        clientTest
       pure endingNodeStates
 
     correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) = length (nub $ fmap testNodeLog $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
+    correctResult (Right testStates) =
+      let (inAgreement, inDisagreement) = partition
+            (== testNodeLog (testStates Map.! node0))
+            (fmap testNodeLog $ Map.elems testStates)
+      in  length inAgreement > length inDisagreement
+      --length (nub $ fmap testNodeLog $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
     correctResult (Left _) = False
 
-
 test_AEFollower :: TestTree
-test_AEFollower = majorityNodeStatesEqual (leaderElection' node0)
+test_AEFollower = majorityNodeStatesEqual (pure ())
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 4, SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
   ]
 
 test_AEFollowerBehindOneTerm :: TestTree
-test_AEFollowerBehindOneTerm = majorityNodeStatesEqual (leaderElection' node0)
+test_AEFollowerBehindOneTerm = majorityNodeStatesEqual (pure ())
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 3, Seq.take 10 SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
   ]
 
 test_AEFollowerBehindMultipleTerms :: TestTree
-test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (leaderElection' node0)
+test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (pure ())
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 2, Seq.take 5 SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
