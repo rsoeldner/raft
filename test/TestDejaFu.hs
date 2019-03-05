@@ -181,7 +181,6 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
             (== testNodeLog (testStates Map.! node0))
             (fmap testNodeLog $ Map.elems testStates)
       in  length inAgreement > length inDisagreement
-      --length (nub $ fmap testNodeLog $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
     correctResult (Left _) = False
 
 test_AEFollower :: TestTree
