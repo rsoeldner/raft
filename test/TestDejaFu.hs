@@ -172,7 +172,7 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
       let startingNodeStates = initTestStates startingStatesConfig
       (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
         leaderElection' node0
-        clientTest
+        --clientTest
       pure endingNodeStates
 
     correctResult :: Either Condition TestNodeStates -> Bool
