@@ -172,6 +172,8 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
       let startingNodeStates = initTestStates startingStatesConfig
       (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
         leaderElection' node0
+        clientTest
+      --(res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
         --clientTest
       pure endingNodeStates
 
@@ -199,6 +201,7 @@ test_AEFollowerBehindOneTerm = majorityNodeStatesEqual (pure ())
 
 test_AEFollowerBehindMultipleTerms :: TestTree
 test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (pure ())
+--test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (leaderElection' node0)
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 2, Seq.take 5 SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
