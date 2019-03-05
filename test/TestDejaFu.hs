@@ -175,7 +175,7 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
       pure endingNodeStates
 
     correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) = length (nub $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
+    correctResult (Right testStates) = length (group $ Map.elems testStates) <= 2 -- TODO hardcoded to running with 3 nodes
     correctResult (Left _) = False
 
 
