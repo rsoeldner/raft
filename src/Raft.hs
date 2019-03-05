@@ -351,19 +351,23 @@ handleAction
   -> RaftT v m ()
 handleAction action = do
   logDebug $ "Handling [Action]: " <> show action
+  let sendRPCThread nid rpcMsg = do
+        let threadRole = "SendRPC: " <> toS nid <> " - " <> show rpcMsg
+        void (raftFork (CustomThreadRole threadRole) (lift (sendRPC nid rpcMsg)))
   case action of
     SendRPC nid sendRpcAction -> do
-      void . raftFork (CustomThreadRole "Send RPC") $ do
-        rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
-        lift (sendRPC nid rpcMsg)
+      rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
+      sendRPCThread nid rpcMsg
     SendRPCs rpcMap ->
-      flip mapM_ (Map.toList rpcMap) $ \(nid, sendRpcAction) ->
-        raftFork (CustomThreadRole "Send RPC") $ do
-          rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
-          lift (sendRPC nid rpcMsg)
+      forM_ (Map.toList rpcMap) $ \(nid, sendRpcAction) -> do
+        rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
+        sendRPCThread nid rpcMsg
     BroadcastRPC nids sendRpcAction -> do
       rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
-      mapM_ (raftFork (CustomThreadRole "RPC Broadcast Thread") . lift . flip sendRPC rpcMsg) nids
+      let sendRPC' = lift . flip sendRPC rpcMsg
+      forM_ nids $ \nid -> do
+        let threadRole = "RPC Broadcast: " <> toS nid
+        raftFork (CustomThreadRole threadRole) (sendRPC' nid)
     RespondToClient cid cr -> respondToClient cid cr
     ResetTimeoutTimer tout -> do
       case tout of

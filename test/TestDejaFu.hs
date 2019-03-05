@@ -51,7 +51,7 @@ dejaFuSettings = defaultSettings { _way = randomly (mkStdGen 42) 100 }
 
 test_concurrency :: [TestTree]
 test_concurrency =
-    [ testGroup "Leader Election" [ testConcurrentProps (leaderElection node0) mempty ]
+    [ testGroup "Leader Election" [ testConcurrentProps (leaderElectionTest node0) mempty ]
     , testGroup "increment(set('x', 41)) == x := 42"
         [ testConcurrentProps incrValue (Map.fromList [("x", 42)], Index 3) ]
     , testGroup "set('x', 0) ... 10x incr(x) == x := 10"
@@ -75,10 +75,10 @@ testConcurrentProps test expected =
     , ("Success", alwaysTrue (== Right expected))
     ] $ fst <$> withRaftTestNodes emptyTestStates test
 
-leaderElection
+leaderElectionTest
   :: NodeId
   -> RaftTestClientM Store
-leaderElection nid = leaderElection' nid
+leaderElectionTest nid = leaderElection nid
 
 incrValue :: RaftTestClientM (Store, Index)
 incrValue = do
@@ -170,11 +170,12 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
     runTest :: ConcIO TestNodeStates
     runTest = do
       let startingNodeStates = initTestStates startingStatesConfig
-      (res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
-        leaderElection' node0
-        clientTest
-      --(res, endingNodeStates) <- withRaftTestNodes startingNodeStates $ do
-        --clientTest
+      (res, endingNodeStates) <-
+        withRaftTestNodes startingNodeStates $ do
+          leaderElection node0
+          -- eventChans <- lift $ asks testClientEnvNodeEventChans
+          -- lift $ heartbeat (eventChans Map.! node0)
+          clientTest
       pure endingNodeStates
 
     correctResult :: Either Condition TestNodeStates -> Bool
@@ -186,26 +187,34 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
     correctResult (Left _) = False
 
 test_AEFollower :: TestTree
-test_AEFollower = majorityNodeStatesEqual (syncClientWrite node0 (Set "x" 7))
-  [ (node0, Term 4, SampleEntries.entries)
-  , (node1, Term 4, SampleEntries.entries)
-  , (node2, Term 4, SampleEntries.entries)
-  ]
+test_AEFollower =
+  testGroup "AEFollower"
+    [ majorityNodeStatesEqual (syncClientWrite node0 (Set "x" 7))
+      [ (node0, Term 4, SampleEntries.entries)
+      , (node1, Term 4, SampleEntries.entries)
+      , (node2, Term 4, SampleEntries.entries)
+      ]
+    ]
 
 test_AEFollowerBehindOneTerm :: TestTree
-test_AEFollowerBehindOneTerm = majorityNodeStatesEqual (pure ())
-  [ (node0, Term 4, SampleEntries.entries)
-  , (node1, Term 3, Seq.take 10 SampleEntries.entries)
-  , (node2, Term 4, SampleEntries.entries)
-  ]
+test_AEFollowerBehindOneTerm =
+  testGroup "AEFollowerBehindOneTerm"
+    [ majorityNodeStatesEqual (pure ())
+      [ (node0, Term 4, SampleEntries.entries)
+      , (node1, Term 3, Seq.take 9 SampleEntries.entries)
+      , (node2, Term 3, Seq.take 9 SampleEntries.entries)
+      ]
+    ]
 
 test_AEFollowerBehindMultipleTerms :: TestTree
-test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (pure ())
---test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (leaderElection' node0)
-  [ (node0, Term 4, SampleEntries.entries)
-  , (node1, Term 2, Seq.take 5 SampleEntries.entries)
-  , (node2, Term 4, SampleEntries.entries)
-  ]
+test_AEFollowerBehindMultipleTerms =
+  testGroup "AEFollowerBehindMultipleTerms"
+    [ majorityNodeStatesEqual (pure ())
+      [ (node0, Term 4, SampleEntries.entries)
+      , (node1, Term 2, Seq.take 6 SampleEntries.entries)
+      , (node2, Term 2, Seq.take 6 SampleEntries.entries)
+      ]
+    ]
 
 --prop_AEFollowerBehind :: Small (Positive Integer) -> Small (Positive Integer) -> Bool
 --prop_AEFollowerBehind (Small (Positive numEntriesPerTerm)) numTerms = majorityNodeStatesEqual (leaderElection' node0)
@@ -215,4 +224,3 @@ test_AEFollowerBehindMultipleTerms = majorityNodeStatesEqual (pure ())
     --]
   --where
     --entries = SampleEntries.genEntries numEntriesPerTerm numTerms
-

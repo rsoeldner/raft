@@ -379,14 +379,20 @@ clientReadRespChan = do
   clientRespChan <- lift (asks testClientEnvRespChan)
   lift $ lift $ atomically $ readTChan clientRespChan
 
-leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> RaftTestClientT m Store
-leaderElection' nid = do
-    eventChans <- lift $ asks testClientEnvNodeEventChans
-    let Just nodeEventChan = Map.lookup nid eventChans
-    sysTime <- liftIO getSystemTime
-    lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
-    pollForReadResponse nid
+leaderElection
+  :: (MonadConc m, MonadIO m, MonadFail m)
+  => NodeId
+  -> RaftTestClientT m Store
+leaderElection nid = do
+  leaderElection' nid
+  pollForReadResponse nid
 
+leaderElection' :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> RaftTestClientT m ()
+leaderElection' nid = do
+  eventChans <- lift $ asks testClientEnvNodeEventChans
+  let Just nodeEventChan = Map.lookup nid eventChans
+  sysTime <- liftIO getSystemTime
+  lift $ lift $ atomically $ writeTChan nodeEventChan (TimeoutEvent sysTime ElectionTimeout)
 
 --------------------------------------------------------------------------------
 -- Test Harness and helpers
