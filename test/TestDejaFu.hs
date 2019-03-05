@@ -184,7 +184,7 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
     correctResult (Left _) = False
 
 test_AEFollower :: TestTree
-test_AEFollower = majorityNodeStatesEqual (pure ())
+test_AEFollower = majorityNodeStatesEqual (syncClientWrite node0 (Set "x" 7))
   [ (node0, Term 4, SampleEntries.entries)
   , (node1, Term 4, SampleEntries.entries)
   , (node2, Term 4, SampleEntries.entries)
