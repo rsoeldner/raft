@@ -441,9 +441,9 @@ handleAction action = do
           SendAppendEntriesRPC aeData -> do
             (entries, prevLogIndex, prevLogTerm, aeReadReq) <-
               case aedEntriesSpec aeData of
-                FromIndex idx -> mkPrevLogEntryDataByIdx idx
-                FromClientWriteReq e -> mkPrevEntryDataByEntry e
-                FromNewLeader e -> mkPrevEntryDataByEntry e
+                FromIndex idx -> attachNothing <$> mkPrevLogEntryDataByIdx idx
+                FromClientWriteReq e -> attachNothing <$> mkPrevEntryDataByEntry e
+                FromNewLeader e -> attachNothing <$> mkPrevEntryDataByEntry e
                 NoEntries spec -> do
                   let readReq =
                         case spec of
@@ -453,7 +453,7 @@ handleAction action = do
                     case getLastLogEntry ns of
                       NoLogEntries -> pure (index0, term0)
                       LastLogEntry e -> do
-                        (_,prevLogIdx, prevLogTerm) <- mkPrevEntryDataByEntry' e
+                        (_,prevLogIdx, prevLogTerm) <- mkPrevEntryDataByEntry e
                         pure (prevLogIdx, prevLogTerm)
                   pure (Empty, prevLogIdx, prevLogTerm, readReq)
             let leaderId = LeaderId (configNodeId nodeConfig)
@@ -471,14 +471,12 @@ handleAction action = do
           SendRequestVoteRPC rv -> pure (toRPC rv)
           SendRequestVoteResponseRPC rvr -> pure (toRPC rvr)
 
-    mkPrevLogEntryDataByIdx idx = do
-      (x,y,z) <- mkPrevLogEntryDataByIdx' idx
-      pure (x,y,z,Nothing)
+    attachNothing (x,y,z) = (x,y,z,Nothing)
 
     -- Make the previous log entry data given an index of an entry in the log.
     -- This function is used for creating heartbeat RPCs, where all logs from
     -- a particular index onwards are sent to a follower.
-    mkPrevLogEntryDataByIdx' idx = do
+    mkPrevLogEntryDataByIdx idx = do
       eLogEntries <- lift (readLogEntriesFrom (decrIndexWithDefault0 idx))
       case eLogEntries of
         Left err -> throwM err
@@ -489,16 +487,12 @@ handleAction action = do
               | otherwise -> pure (entries, entryIndex pe, entryTerm pe)
             _ -> pure (log, index0, term0)
 
-    mkPrevEntryDataByEntry e = do
-      (x,y,z) <- mkPrevEntryDataByEntry' e
-      pure (x,y,z,Nothing)
-
     -- Make the previous log entry data given a specific log entry and return
     -- the list of entries equal to the singleton including the original entry.
     -- This function is used for creating Append Entry RPCs resulting from
     -- client write requests, new leader no-op entries, empty heartbeat RPCs,
     -- and client read requests.
-    mkPrevEntryDataByEntry' e
+    mkPrevEntryDataByEntry e
       | entryIndex e == Index 1 = pure (singleton e, index0, term0)
       | otherwise = do
           let prevLogEntryIdx = decrIndexWithDefault0 (entryIndex e)
