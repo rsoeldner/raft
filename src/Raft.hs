@@ -107,6 +107,8 @@ import Protolude hiding (STM, TChan, newRaftChan, readBoundedChan, writeBoundedC
 
 import Control.Concurrent.STM.Timer
 
+import qualified Control.Monad.Metrics as Metrics
+
 import Control.Monad.Fail
 import Control.Monad.Catch
 
@@ -136,7 +138,7 @@ import Raft.Types
 runRaftNode
   :: forall m sm v.
      ( Typeable m, Show v, Show sm, Serialize v, Show (Action sm v), Show (RaftLogError m), Show (RaftStateMachinePureError sm v)
-     , MonadIO m, MonadCatch m, MonadFail m, MonadRaft v m
+     , MonadIO m, MonadCatch m, MonadFail m, MonadMask m, MonadRaft v m
      , RaftStateMachine m sm v
      , RaftSendRPC m v
      , RaftRecvRPC m v
@@ -164,7 +166,7 @@ runRaftNode nodeConfig@RaftNodeConfig{..} logCtx timerSeed initRaftStateMachine 
   let resetElectionTimer = liftIO $ void $ resetTimer electionTimer
       resetHeartbeatTimer = liftIO $ void $ resetTimer heartbeatTimer
 
-  let raftEnv = RaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx
+  raftEnv <- initializeRaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx
   runRaftT initRaftNodeState raftEnv $ do
 
     -- These event producers need access to logging, thus they live in RaftT
@@ -201,7 +203,7 @@ runRaftNode nodeConfig@RaftNodeConfig{..} logCtx timerSeed initRaftStateMachine 
 handleEventLoop
   :: forall sm v m.
      ( Show v, Serialize v, Show sm, Show (Action sm v), Show (RaftLogError m), Typeable m
-     , MonadIO m, MonadRaft v m, MonadFail m, MonadThrow m
+     , MonadIO m, MonadRaft v m, MonadFail m, MonadThrow m, MonadMask m
      , RaftStateMachine m sm v
      , Show (RaftStateMachinePureError sm v)
      , RaftPersist m
@@ -243,6 +245,9 @@ handleEventLoop initRaftStateMachine = do
                   eRes <- lift (applyLogCmd MonadicValidation stateMachine cmd)
                   case eRes of
                     Left err -> do
+                      -- Increments the number of invalid commands seen during
+                      -- the lifetime of this node.
+                      Metrics.increment "# Invalid Client Write Requests"
                       let clientWriteRespSpec = ClientWriteRespSpec (ClientWriteRespSpecFail serial err)
                           clientFailRespAction = RespondToClient cid clientWriteRespSpec
                       handleAction clientFailRespAction
@@ -323,9 +328,11 @@ handleEventLoop initRaftStateMachine = do
         Right (Just e) ->
           put (RaftNodeState (setLastLogEntry rns (singleton e)))
 
+-- | Handles all actions produced by the main 'handleEventLoop'' call. This
+-- function records the distribution of time each call to 'handleAction' takes.
 handleActions
   :: ( Show v, Show sm, Show (Action sm v), Show (RaftLogError m), Typeable m
-     , MonadIO m, MonadRaft v m, MonadThrow m
+     , MonadIO m, MonadRaft v m, MonadThrow m, MonadMask m
      , RaftStateMachine m sm v
      , RaftSendRPC m v
      , RaftSendClient m sm v
@@ -334,8 +341,8 @@ handleActions
      )
   => [Action sm v]
   -> RaftT v m ()
-handleActions actions =
-  mapM_ handleAction actions
+handleActions actions = do
+  mapM_ (Metrics.timed "handleAction" . handleAction) actions
 
 handleAction
   :: forall sm v m.

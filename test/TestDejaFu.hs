@@ -281,14 +281,14 @@ initRaftTestEnvs eventChans clientRespChans = (testNodeEnvs, testStates)
       replicate (length nodeIds) (TestNodeState mempty initPersistentState)
 
 runTestNode :: TestNodeEnv -> TestNodeStates -> ConcIO ()
-runTestNode testEnv testState = do
-    runRaftTestM testEnv testState $
+runTestNode testEnv testState =
+    runRaftTestM testEnv testState $ do
+      raftEnv <- initializeRaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
       runRaftT initRaftNodeState raftEnv $
         handleEventLoop (mempty :: Store)
   where
     nid = configNodeId (testRaftNodeConfig testEnv)
     Just eventChan = Map.lookup nid (testNodeEventChans testEnv)
-    raftEnv = RaftEnv eventChan dummyTimer dummyTimer (testRaftNodeConfig testEnv) NoLogs
     dummyTimer = pure ()
 
 forkTestNodes :: [TestNodeEnv] -> TestNodeStates -> ConcIO [ThreadId ConcIO]

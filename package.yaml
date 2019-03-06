@@ -51,6 +51,7 @@ dependencies:
 - dejafu >= 1.12.0.0
 - stm
 - async
+- monad-metrics
 
 default-extensions:
   NoImplicitPrelude

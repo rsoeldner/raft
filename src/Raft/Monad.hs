@@ -13,6 +13,7 @@ module Raft.Monad where
 
 import Protolude hiding (STM, TChan, readTChan, writeTChan, newTChan, atomically)
 
+import qualified Control.Monad.Metrics as Metrics
 import Control.Monad.Catch
 import Control.Monad.Fail
 import Control.Monad.Trans.Class
@@ -104,6 +105,7 @@ data RaftEnv v m = RaftEnv
   , resetHeartbeatTimer :: m ()
   , raftNodeConfig :: RaftNodeConfig
   , raftNodeLogCtx :: LogCtx (RaftT v m)
+  , raftNodeMetrics :: Metrics.Metrics
   }
 
 newtype RaftT v m a = RaftT
@@ -116,6 +118,7 @@ instance MonadTrans (RaftT v) where
 deriving instance MonadIO m => MonadIO (RaftT v m)
 deriving instance MonadThrow m => MonadThrow (RaftT v m)
 deriving instance MonadCatch m => MonadCatch (RaftT v m)
+deriving instance MonadMask m => MonadMask (RaftT v m)
 
 instance MonadRaftFork m => MonadRaftFork (RaftT v m) where
   type RaftThreadId (RaftT v m) = RaftThreadId m
@@ -126,6 +129,28 @@ instance MonadRaftFork m => MonadRaftFork (RaftT v m) where
 
 instance Monad m => RaftLogger v (RaftT v m) where
   loggerCtx = (,) <$> asks (configNodeId . raftNodeConfig) <*> get
+
+instance Monad m => Metrics.MonadMetrics (RaftT v m) where
+  getMetrics = asks raftNodeMetrics
+
+initializeRaftEnv
+  :: MonadIO m
+  => RaftEventChan v m
+  -> m ()
+  -> m ()
+  -> RaftNodeConfig
+  -> LogCtx (RaftT v m)
+  -> m (RaftEnv v m)
+initializeRaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx = do
+  metrics <- liftIO Metrics.initialize
+  pure RaftEnv
+    { eventChan = eventChan
+    , resetElectionTimer = resetElectionTimer
+    , resetHeartbeatTimer = resetHeartbeatTimer
+    , raftNodeConfig = nodeConfig
+    , raftNodeLogCtx = logCtx
+    , raftNodeMetrics = metrics
+    }
 
 runRaftT
   :: Monad m
