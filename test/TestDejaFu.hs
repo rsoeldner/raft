@@ -191,8 +191,8 @@ test_AEFollower =
   testGroup "AEFollower"
     [ majorityNodeStatesEqual (syncClientWrite node0 (Set "x" 7))
       [ (node0, Term 4, SampleEntries.entries)
-      , (node1, Term 4, SampleEntries.entries)
-      , (node2, Term 4, SampleEntries.entries)
+      , (node1, Term 3, Seq.take 9 SampleEntries.entries)
+      --, (node2, Term 4, SampleEntries.entries)
       ]
     ]
 
