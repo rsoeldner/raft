@@ -264,7 +264,8 @@ handleEventLoop initRaftStateMachine = do
           logDebug $ "[NodeState]: " <> show raftNodeState
           logDebug $ "[State Machine]: " <> show stateMachine
           logDebug $ "[Persistent State]: " <> show persistentState
-
+          --traceShowM $  raftNodeState
+          --traceShowM event
           -- Perform core state machine transition, handling the current event
           nodeConfig <- asks raftNodeConfig
           let transitionEnv = TransitionEnv nodeConfig stateMachine raftNodeState

@@ -57,7 +57,9 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       aeData <- mkAppendEntriesData newLeaderState (FromIndex newNextIndex)
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
-  | otherwise =
+  | otherwise = do
+
+      traceM ("LEADER:\n  Received msg from " <> toS sender <> "\n  " <> show appendEntriesResp)
       case aerReadRequest appendEntriesResp of
         Nothing -> leaderResultState Noop <$> do
 
