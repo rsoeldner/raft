@@ -132,6 +132,7 @@ import Raft.RPC
 import Raft.StateMachine
 import Raft.Types
 
+import System.Remote.Monitoring (forkServer)
 
 -- | Run timers, RPC and client request handlers and start event loop.
 -- It should run forever
@@ -155,6 +156,16 @@ runRaftNode
    -> sm                   -- ^ Initial state machine state
    -> m ()
 runRaftNode nodeConfig@RaftNodeConfig{..} logCtx timerSeed initRaftStateMachine = do
+
+  -- Fork the monitoring server for metrics
+  metricsPort <-
+    case configMetricsPort of
+      Nothing -> pure 0
+      Just port
+        | port > 0 && port <= 65535 -> pure port
+        | otherwise -> panic "Invalid metrics port specified"
+  liftIO (forkServer "localhost" 9000)
+
   -- Initialize the persistent state and logs storage if specified
   initializeStorage
 

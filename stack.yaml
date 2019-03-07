@@ -13,3 +13,5 @@ extra-deps:
 - dejafu-1.12.0.0
 - tasty-dejafu-1.2.1.0
 - monad-metrics-0.2.1.2
+- ekg-0.4.0.15
+- ekg-json-0.1.0.6

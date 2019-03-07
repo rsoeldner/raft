@@ -15,6 +15,7 @@ data RaftNodeConfig = RaftNodeConfig
   , configElectionTimeout :: (Natural, Natural) -- ^ Range of times an election timeout can take
   , configHeartbeatTimeout :: Natural -- ^ Heartbeat timeout timer
   , configStorageState :: StorageState -- ^ Create a fresh DB or read from existing
+  , configMetricsPort :: Maybe Int
   } deriving (Show)
 
 data StorageState = New | Existing
