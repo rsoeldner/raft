@@ -178,21 +178,26 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
           clientTest
       pure endingNodeStates
 
-    correctResult :: Either Condition TestNodeStates -> Bool
-    correctResult (Right testStates) =
-      let (inAgreement, inDisagreement) = partition
-            (== testNodeLog (testStates Map.! node0))
-            (fmap testNodeLog $ Map.elems testStates)
-      in  length inAgreement > length inDisagreement
-    correctResult (Left _) = False
+correctResult :: Either Condition TestNodeStates -> Bool
+correctResult (Right testStates) =
+  let (inAgreement, inDisagreement) = partition
+	(== testNodeLog (testStates Map.! node0))
+	(fmap testNodeLog $ Map.elems testStates)
+  in  length inAgreement > length inDisagreement
+correctResult (Left _) = False
+
+startingStatesConfig = initTestStates[ (node0, Term 4, SampleEntries.entries)
+      , (node1, Term 4, Seq.take 11 SampleEntries.entries)
+      , (node2, Term 4, SampleEntries.entries)
+      ]
 
 test_AEFollower :: TestTree
 test_AEFollower =
   testGroup "AEFollower"
     [ majorityNodeStatesEqual (syncClientWrite node0 (Set "x" 7))
       [ (node0, Term 4, SampleEntries.entries)
-      , (node1, Term 3, Seq.take 9 SampleEntries.entries)
-      --, (node2, Term 4, SampleEntries.entries)
+      , (node1, Term 4, Seq.take 11 SampleEntries.entries)
+      , (node2, Term 4, Seq.take 11 SampleEntries.entries)
       ]
     ]
 

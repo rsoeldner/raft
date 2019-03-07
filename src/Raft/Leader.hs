@@ -49,7 +49,10 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
   -- If AppendEntries fails (aerSuccess == False) because of log inconsistency,
   -- decrement nextIndex and retry
   | not (aerSuccess appendEntriesResp) = do
-      traceM ("LEADER:\n  Received msg from " <> toS sender <> "\n  " <> show appendEntriesResp)
+      traceM $
+           "LEADER (aerSuccess == FALSE):\n  Received msg from " <> toS sender
+        <> "\n  Node State: " <> show ls
+        <> "\n  AER RPC: " <> show appendEntriesResp
       let newNextIndices = Map.adjust decrIndexWithDefault0 sender (lsNextIndex ls)
           newLeaderState = ls { lsNextIndex = newNextIndices }
           Just newNextIndex = Map.lookup sender newNextIndices
@@ -58,8 +61,10 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
   | otherwise = do
-
-      traceM ("LEADER:\n  Received msg from " <> toS sender <> "\n  " <> show appendEntriesResp)
+      traceM $
+           "LEADER (aerSuccess == TRUE):\n  Received msg from " <> toS sender
+        <> "\n  Node State: " <> show ls
+        <> "\n  AER RPC: " <> show appendEntriesResp
       case aerReadRequest appendEntriesResp of
         Nothing -> leaderResultState Noop <$> do
 
