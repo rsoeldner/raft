@@ -52,12 +52,14 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
       let newNextIndices = Map.adjust decrIndexWithDefault0 sender (lsNextIndex ls)
           newLeaderState = ls { lsNextIndex = newNextIndices }
           Just newNextIndex = Map.lookup sender newNextIndices
+
       aeData <- mkAppendEntriesData newLeaderState (FromIndex newNextIndex)
       send sender (SendAppendEntriesRPC aeData)
       pure (leaderResultState Noop newLeaderState)
-  | otherwise = do
+  | otherwise =
       case aerReadRequest appendEntriesResp of
         Nothing -> leaderResultState Noop <$> do
+
           let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
               newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
               newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
