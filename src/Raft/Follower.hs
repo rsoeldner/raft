@@ -59,8 +59,6 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
               if entryAtAePrevLogIndexTerm /= aePrevLogTerm
                 then pure (False, fs)
                 else do
-                  traceShowM  "aesuccess=true"
-                  traceShowM  aeEntries
                   -- 3. If an existing entry conflicts with a new one (same index
                   -- but different terms), delete the existing entry and all that
                   -- follow it.
@@ -72,8 +70,11 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
                   -- min(leaderCommit, index of last new entry)
                   pure (True, updateFollowerState fs)
     when success resetElectionTimeout
-    traceShowM newFollowerState
-    traceShowM success
+    traceM $ "FOLLOWER:\n  Received msg from "
+      <> toS sender
+      <> "\n  AE RPC: " <> show aeEntries
+      <> "\n  New State: " <> show newFollowerState
+      <> "\n  Success: " <> show success
     send (unLeaderId aeLeaderId) $
       SendAppendEntriesResponseRPC $
         AppendEntriesResponse
