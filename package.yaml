@@ -53,6 +53,7 @@ dependencies:
 - async
 - monad-metrics
 - ekg
+- ekg-core
 
 default-extensions:
   NoImplicitPrelude
@@ -69,10 +70,7 @@ executables:
   raft-example:
     main:                Main.hs
     source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+    ghc-options: -threaded -rtsopts "-with-rtsopts=-N -T"
     dependencies:
     - libraft
     - stm

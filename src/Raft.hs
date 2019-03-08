@@ -108,6 +108,7 @@ import Protolude hiding (STM, TChan, newRaftChan, readBoundedChan, writeBoundedC
 import Control.Concurrent.STM.Timer
 
 import qualified Control.Monad.Metrics as Metrics
+import qualified Control.Monad.Metrics.Internal as Metrics
 
 import Control.Monad.Fail
 import Control.Monad.Catch
@@ -132,7 +133,7 @@ import Raft.RPC
 import Raft.StateMachine
 import Raft.Types
 
-import System.Remote.Monitoring (forkServer)
+import qualified System.Remote.Monitoring as EKG
 
 -- | Run timers, RPC and client request handlers and start event loop.
 -- It should run forever
@@ -161,6 +162,7 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
   metricsPort <- liftIO (resolveMetricsPort (raftConfigMetricsPort optConfig))
   timerSeed <- liftIO (resolveTimerSeed (raftConfigTimerSeed optConfig))
 
+
   -- Initialize the persistent state and logs storage if specified
   initializeStorage raftConfigStorageState
 
@@ -176,11 +178,12 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
   raftEnv <- initializeRaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx
   runRaftT initRaftNodeState raftEnv $ do
 
-    logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
-
     -- Fork the monitoring server for metrics
     logInfo ("Forking metrics server on port " <> show metricsPort <> "...")
-    liftIO (forkServer "localhost" (fromIntegral metricsPort))
+    store <- Metrics._metricsStore <$> Metrics.getMetrics
+    liftIO (EKG.forkServerWith store "localhost" (fromIntegral metricsPort))
+
+    logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
 
     -- These event producers need access to logging, thus they live in RaftT
     --
@@ -260,7 +263,7 @@ handleEventLoop initStateMachine = do
                     Left err -> do
                       -- Increments the number of invalid commands seen during
                       -- the lifetime of this node.
-                      Metrics.increment "# Invalid Client Write Requests"
+                      incrInvalidCmdCounter
                       let clientWriteRespSpec = ClientWriteRespSpec (ClientWriteRespSpecFail serial err)
                           clientFailRespAction = RespondToClient cid clientWriteRespSpec
                       handleAction clientFailRespAction
@@ -273,6 +276,8 @@ handleEventLoop initStateMachine = do
 
     handleEventLoop' :: sm -> PersistentState -> RaftT v m ()
     handleEventLoop' stateMachine persistentState = do
+
+      incrEventsHandledCounter
 
       mRes <-
         withValidatedEvent stateMachine $ \event -> do
@@ -341,8 +346,7 @@ handleEventLoop initStateMachine = do
         Right (Just e) ->
           put (RaftNodeState (setLastLogEntry rns (singleton e)))
 
--- | Handles all actions produced by the main 'handleEventLoop'' call. This
--- function records the distribution of time each call to 'handleAction' takes.
+-- | Handles all actions produced by the main 'handleEventLoop'' call.
 handleActions
   :: ( Show v, Show sm, Show (Action sm v), Show (RaftLogError m), Typeable m
      , MonadIO m, MonadRaft v m, MonadThrow m, MonadMask m
@@ -355,7 +359,7 @@ handleActions
   => [Action sm v]
   -> RaftT v m ()
 handleActions actions = do
-  mapM_ (Metrics.timed "handleAction" . handleAction) actions
+  mapM_ handleAction actions
 
 handleAction
   :: forall sm v m.

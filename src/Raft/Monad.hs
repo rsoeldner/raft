@@ -29,6 +29,9 @@ import Raft.NodeState
 import Test.DejaFu.Conc (ConcIO)
 import qualified Test.DejaFu.Types as TDT
 
+import qualified System.Remote.Monitoring as EKG
+import qualified System.Metrics as EKG
+
 --------------------------------------------------------------------------------
 -- Raft Monad Class
 --------------------------------------------------------------------------------
@@ -160,6 +163,22 @@ runRaftT
   -> m a
 runRaftT raftNodeState raftEnv =
   flip evalStateT raftNodeState . flip runReaderT raftEnv . unRaftT
+
+------------------------------------------------------------------------------
+-- Metrics
+------------------------------------------------------------------------------
+
+data InvalidCmdCounter = InvalidCmdCounter
+  deriving Show
+
+incrInvalidCmdCounter :: MonadIO m => RaftT v m ()
+incrInvalidCmdCounter = Metrics.increment (show InvalidCmdCounter)
+
+data EventsHandledCounter = EventsHandledCounter
+  deriving Show
+
+incrEventsHandledCounter :: MonadIO m => RaftT v m ()
+incrEventsHandledCounter = Metrics.increment "events.counter" -- (show EventsHandledCounter)
 
 ------------------------------------------------------------------------------
 -- Logging
