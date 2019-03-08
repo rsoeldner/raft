@@ -166,6 +166,8 @@ instance forall m. MonadConc m => RaftSendRPC (RaftTestT m) StoreCmd where
 
 instance MonadConc m => RaftSendClient (RaftTestT m) Store StoreCmd where
   sendClient cid cr = do
+
+    traceShowM cid
     clientRespChans <- asks testClientRespChans
     case Map.lookup cid clientRespChans of
       Nothing -> panic "Failed to find client id in environment"
@@ -215,7 +217,8 @@ instance MonadConc m => RaftReadLog (RaftTestT m) StoreCmd where
 instance forall m. (MonadConc m, MonadRaftChan StoreCmd m) => MonadRaftChan StoreCmd (RaftTestT m) where
   type RaftEventChan StoreCmd (RaftTestT m) = TestEventChan m
   readRaftChan = atomically . readTChan
-  writeRaftChan chan ev = atomically $ writeTChan chan ev
+  writeRaftChan chan ev = do
+    atomically $ writeTChan chan ev
   newRaftChan = atomically newTChan
 
 instance (MonadConc m, MonadRaftFork m) => MonadRaftFork (RaftTestT m) where
