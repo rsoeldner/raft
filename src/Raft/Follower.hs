@@ -70,11 +70,6 @@ handleAppendEntries ns@(NodeFollowerState fs) sender AppendEntries{..} = do
                   -- min(leaderCommit, index of last new entry)
                   pure (True, updateFollowerState fs)
     when success resetElectionTimeout
-    traceM $ "FOLLOWER:\n  Received msg from "
-      <> toS sender
-      <> "\n  AE RPC: " <> show aeEntries
-      <> "\n  New State: " <> show newFollowerState
-      <> "\n  Success: " <> show success
     send (unLeaderId aeLeaderId) $
       SendAppendEntriesResponseRPC $
         AppendEntriesResponse
