@@ -180,7 +180,7 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
 
     -- Fork the monitoring server for metrics
     logInfo ("Forking metrics server on port " <> show metricsPort <> "...")
-    liftIO (forkServer "localhost" 9000)
+    liftIO (forkServer "localhost" (fromIntegral metricsPort))
 
     -- These event producers need access to logging, thus they live in RaftT
     --

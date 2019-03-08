@@ -39,8 +39,17 @@ data ConfigError
 
 resolveMetricsPort
   :: Maybe PortNumber
+  -> IO PortNumber
+resolveMetricsPort mPort = do
+  eMetricsPort <- resolveMetricsPortE mPort
+  case eMetricsPort of
+    Left err -> panic ("Error in raft node config: " <> show err)
+    Right port -> pure port
+
+resolveMetricsPortE
+  :: Maybe PortNumber
   -> IO (Either ConfigError PortNumber)
-resolveMetricsPort mPort =
+resolveMetricsPortE mPort =
   case mPort of
     Just port
       | port > 0 && port <= 65535 -> pure (Right port)
