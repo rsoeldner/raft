@@ -24,7 +24,7 @@ import Data.Sequence (Seq(Empty))
 import qualified Data.Set as Set
 import qualified Data.Sequence as Seq
 
-import Raft.Config (configNodeIds)
+import Raft.Config (raftConfigNodeIds)
 import Raft.NodeState
 import Raft.RPC
 import Raft.Action
@@ -72,7 +72,7 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
   where
     handleReadReq :: Int -> LeaderState v -> TransitionM sm v (ResultState 'Leader v)
     handleReadReq n leaderState = do
-      networkSize <- Set.size <$> asks (configNodeIds . nodeConfig)
+      networkSize <- Set.size <$> asks (raftConfigNodeIds . nodeConfig)
       let initReadReqs = lsReadRequest leaderState
           (mCreqData, newReadReqs) =
             case Map.lookup n initReadReqs of

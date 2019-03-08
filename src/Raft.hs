@@ -150,35 +150,37 @@ runRaftNode
      , RaftPersist m
      , Exception (RaftPersistError m)
      )
-   => RaftNodeConfig       -- ^ Node configuration
-   -> LogCtx (RaftT v m)   -- ^ Logs destination
-   -> Int                  -- ^ Timer seed
-   -> sm                   -- ^ Initial state machine state
+   => RaftNodeConfig         -- ^ Node configuration
+   -> OptionalRaftNodeConfig -- ^ Config values that can be provided optionally
+   -> LogCtx (RaftT v m)     -- ^ The means with which to log messages
+   -> sm                     -- ^ Initial state machine state
    -> m ()
-runRaftNode nodeConfig@RaftNodeConfig{..} logCtx timerSeed initRaftStateMachine = do
+runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
 
-  -- Fork the monitoring server for metrics
-  metricsPort <-
-    case configMetricsPort of
-      Nothing -> pure 0
-      Just port
-        | port > 0 && port <= 65535 -> pure port
-        | otherwise -> panic "Invalid metrics port specified"
-  liftIO (forkServer "localhost" 9000)
+  -- Resolve the optional config values
+  metricsPort <- liftIO (resolveMetricsPort (raftConfigMetricsPort optConfig))
+  timerSeed <- liftIO (resolveTimerSeed (raftConfigTimerSeed optConfig))
 
   -- Initialize the persistent state and logs storage if specified
-  initializeStorage
+  initializeStorage raftConfigStorageState
 
+  -- Initialize the main event channel
   eventChan <- newRaftChan @v
 
   -- Create timers and reset timer actions
-  electionTimer <- liftIO $ newTimerRange timerSeed configElectionTimeout
-  heartbeatTimer <- liftIO $ newTimer configHeartbeatTimeout
+  electionTimer <- liftIO $ newTimerRange timerSeed raftConfigElectionTimeout
+  heartbeatTimer <- liftIO $ newTimer raftConfigHeartbeatTimeout
   let resetElectionTimer = liftIO $ void $ resetTimer electionTimer
       resetHeartbeatTimer = liftIO $ void $ resetTimer heartbeatTimer
 
   raftEnv <- initializeRaftEnv eventChan resetElectionTimer resetHeartbeatTimer nodeConfig logCtx
   runRaftT initRaftNodeState raftEnv $ do
+
+    logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
+
+    -- Fork the monitoring server for metrics
+    logInfo ("Forking metrics server on port " <> show metricsPort <> "...")
+    liftIO (forkServer "localhost" 9000)
 
     -- These event producers need access to logging, thus they live in RaftT
     --
@@ -195,11 +197,11 @@ runRaftNode nodeConfig@RaftNodeConfig{..} logCtx timerSeed initRaftStateMachine 
     raftFork ClientRequestHandler (clientReqHandler @m @v eventChan)
 
     -- Start the main event handling loop
-    handleEventLoop initRaftStateMachine
+    handleEventLoop initStateMachine
 
   where
-    initializeStorage =
-      case configStorageState of
+    initializeStorage storageState =
+      case storageState of
         New -> do
           ipsRes <- initializePersistentState
           case ipsRes of
@@ -227,12 +229,12 @@ handleEventLoop
      )
   => sm
   -> RaftT v m ()
-handleEventLoop initRaftStateMachine = do
+handleEventLoop initStateMachine = do
     setInitLastLogEntry
     ePersistentState <- lift readPersistentState
     case ePersistentState of
       Left err -> throwM err
-      Right pstate -> handleEventLoop' initRaftStateMachine pstate
+      Right pstate -> handleEventLoop' initStateMachine pstate
   where
 
     -- Some events must be validated before being processed by the system:
@@ -454,7 +456,7 @@ handleAction action = do
     mkRPCfromSendRPCAction sendRPCAction = do
       RaftNodeState ns <- get
       nodeConfig <- asks raftNodeConfig
-      RPCMessage (configNodeId nodeConfig) <$>
+      RPCMessage (raftConfigNodeId nodeConfig) <$>
         case sendRPCAction of
           SendAppendEntriesRPC aeData -> do
             (entries, prevLogIndex, prevLogTerm, aeReadReq) <-
@@ -474,7 +476,7 @@ handleAction action = do
                         (_,prevLogIdx, prevLogTerm) <- mkPrevEntryDataByEntry e
                         pure (prevLogIdx, prevLogTerm)
                   pure (Empty, prevLogIdx, prevLogTerm, readReq)
-            let leaderId = LeaderId (configNodeId nodeConfig)
+            let leaderId = LeaderId (raftConfigNodeId nodeConfig)
             pure . toRPC $
               AppendEntries
                 { aeTerm = aedTerm aeData

@@ -114,7 +114,7 @@ instance Exception RaftTestError
 throwTestErr = throw . RaftTestError
 
 askSelfNodeId :: RaftTestM NodeId
-askSelfNodeId = asks (configNodeId . testRaftNodeConfig)
+askSelfNodeId = asks (raftConfigNodeId . testRaftNodeConfig)
 
 lookupNodeEventChan :: NodeId -> RaftTestM TestEventChan
 lookupNodeEventChan nid = do
@@ -287,7 +287,7 @@ runTestNode testEnv testState =
       runRaftT initRaftNodeState raftEnv $
         handleEventLoop (mempty :: Store)
   where
-    nid = configNodeId (testRaftNodeConfig testEnv)
+    nid = raftConfigNodeId (testRaftNodeConfig testEnv)
     Just eventChan = Map.lookup nid (testNodeEventChans testEnv)
     dummyTimer = pure ()
 

@@ -66,7 +66,7 @@ instance MonadState PersistentState (TransitionM sm v) where
   put = TransitionM . RaftLoggerT . lift . put
 
 instance RaftLogger v (RWS (TransitionEnv sm v) [Action sm v] PersistentState) where
-  loggerCtx = asks ((configNodeId . nodeConfig) &&& nodeState)
+  loggerCtx = asks ((raftConfigNodeId . nodeConfig) &&& nodeState)
 
 runTransitionM
   :: TransitionEnv sm v
@@ -77,13 +77,13 @@ runTransitionM transEnv persistentState transitionM =
   runRWS (runRaftLoggerT (unTransitionM transitionM)) transEnv persistentState
 
 askNodeId :: TransitionM sm v NodeId
-askNodeId = asks (configNodeId . nodeConfig)
+askNodeId = asks (raftConfigNodeId . nodeConfig)
 
 -- | Returns the set of all node ids excluding the node's own id
 askPeerNodeIds :: TransitionM sm v NodeIds
 askPeerNodeIds = do
   selfNodeId <- askNodeId
-  allNodeIds <- asks (configNodeIds . nodeConfig)
+  allNodeIds <- asks (raftConfigNodeIds . nodeConfig)
   pure (Set.delete selfNodeId allNodeIds)
 
 --------------------------------------------------------------------------------
@@ -103,7 +103,7 @@ broadcast sendRPC = do
   selfNodeId <- askNodeId
   tellAction =<<
     flip BroadcastRPC sendRPC
-      <$> asks (Set.filter (selfNodeId /=) . configNodeIds . nodeConfig)
+      <$> asks (Set.filter (selfNodeId /=) . raftConfigNodeIds . nodeConfig)
 
 send :: NodeId -> SendRPCAction v -> TransitionM sm v ()
 send nodeId sendRPC = tellAction (SendRPC nodeId sendRPC)

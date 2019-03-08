@@ -128,7 +128,7 @@ instance MonadRaftFork m => MonadRaftFork (RaftT v m) where
     lift $ raftFork s (runRaftT raftState raftEnv m)
 
 instance Monad m => RaftLogger v (RaftT v m) where
-  loggerCtx = (,) <$> asks (configNodeId . raftNodeConfig) <*> get
+  loggerCtx = (,) <$> asks (raftConfigNodeId . raftNodeConfig) <*> get
 
 instance Monad m => Metrics.MonadMetrics (RaftT v m) where
   getMetrics = asks raftNodeMetrics
@@ -164,6 +164,9 @@ runRaftT raftNodeState raftEnv =
 ------------------------------------------------------------------------------
 -- Logging
 ------------------------------------------------------------------------------
+
+logInfo :: MonadIO m => Text -> RaftT v m ()
+logInfo msg = flip logInfoIO msg =<< asks raftNodeLogCtx
 
 logDebug :: MonadIO m => Text -> RaftT v m ()
 logDebug msg = flip logDebugIO msg =<< asks raftNodeLogCtx

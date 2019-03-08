@@ -67,7 +67,7 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
       | not rvrVoteGranted -> pure $ candidateResultState Noop candidateState
       | otherwise -> do
           let newCsVotes = Set.insert sender csVotes
-          cNodeIds <- asks (configNodeIds . nodeConfig)
+          cNodeIds <- asks (raftConfigNodeIds . nodeConfig)
           if not $ hasMajority cNodeIds newCsVotes
             then do
               let newCandidateState = candidateState { csVotes = newCsVotes }
@@ -83,7 +83,7 @@ handleRequestVoteResponse (NodeCandidateState candidateState@CandidateState{..})
     mkNoopEntry = do
       let lastLogEntryIdx = lastLogEntryIndex csLastLogEntry
       currTerm <- gets currentTerm
-      nid <- asks (configNodeId . nodeConfig)
+      nid <- asks (raftConfigNodeId . nodeConfig)
       pure Entry
         { entryIndex = succ lastLogEntryIdx
         , entryTerm  = currTerm
