@@ -179,9 +179,12 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
   runRaftT initRaftNodeState raftEnv $ do
 
     -- Fork the monitoring server for metrics
-    logInfo ("Forking metrics server on port " <> show metricsPort <> "...")
-    store <- Metrics._metricsStore <$> Metrics.getMetrics
-    liftIO (EKG.forkServerWith store "localhost" (fromIntegral metricsPort))
+    case metricsPort of
+      Nothing -> pure ()
+      Just port -> do
+        logInfo ("Forking metrics server on port " <> show port <> "...")
+        store <- Metrics._metricsStore <$> Metrics.getMetrics
+        void $ liftIO (EKG.forkServerWith store "localhost" (fromIntegral port ))
 
     logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
 
