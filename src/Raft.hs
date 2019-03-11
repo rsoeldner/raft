@@ -293,7 +293,8 @@ handleEventLoop initStateMachine = do
 
           -- Perform core state machine transition, handling the current event
           nodeConfig <- asks raftNodeConfig
-          let transitionEnv = TransitionEnv nodeConfig stateMachine raftNodeState
+          raftNodeMetrics <- getRaftNodeMetrics
+          let transitionEnv = TransitionEnv nodeConfig stateMachine raftNodeState raftNodeMetrics
           pure (Raft.Handle.handleEvent raftNodeState transitionEnv persistentState event)
 
       case mRes of

@@ -25,6 +25,7 @@ import Raft.Config
 import Raft.Event
 import Raft.Log
 import Raft.Persistent
+import Raft.Monad
 import Raft.NodeState
 import Raft.RPC
 import Raft.Types
@@ -43,9 +44,10 @@ tellActions :: [Action sm v] -> TransitionM sm v ()
 tellActions as = tell as
 
 data TransitionEnv sm v = TransitionEnv
-  { nodeConfig :: !RaftNodeConfig
-  , stateMachine :: !sm
-  , nodeState :: !(RaftNodeState v)
+  { nodeConfig :: RaftNodeConfig
+  , stateMachine :: sm
+  , nodeState :: RaftNodeState v
+  , nodeMetrics :: RaftNodeMetrics
   }
 
 newtype TransitionM sm v a = TransitionM

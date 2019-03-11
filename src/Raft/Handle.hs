@@ -152,8 +152,7 @@ handleEvent' initNodeState transitionEnv persistentState event =
         MessageEvent mev ->
           case mev of
             RPCMessageEvent rpcMsg -> handleRPCMessage rpcMsg
-            ClientRequestEvent cr -> do
-              handleClientRequest initNodeState cr
+            ClientRequestEvent cr -> handleClientRequest initNodeState cr
         TimeoutEvent _ tout -> do
           handleTimeout initNodeState tout
   where
