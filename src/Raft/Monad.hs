@@ -3,13 +3,38 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# Language ConstraintKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
-module Raft.Monad where
+module Raft.Monad (
+
+  MonadRaft
+, MonadRaftChan(..)
+
+, RaftThreadRole(..)
+, MonadRaftFork(..)
+
+, RaftEnv(..)
+, initializeRaftEnv
+, RaftT
+, runRaftT
+
+, RaftNodeMetrics
+, getRaftNodeMetrics
+, incrInvalidCmdCounter
+, incrEventsHandledCounter
+
+, Raft.Monad.logInfo
+, Raft.Monad.logDebug
+, Raft.Monad.logCritical
+, Raft.Monad.logAndPanic
+
+) where
 
 import Protolude hiding (STM, TChan, readTChan, writeTChan, newTChan, atomically)
 
@@ -21,6 +46,11 @@ import qualified Control.Monad.Conc.Class as Conc
 
 import Control.Concurrent.Classy.STM.TChan
 
+import qualified Data.HashMap.Strict as HashMap
+import Data.Serialize (Serialize)
+
+import Lens.Micro ((^.))
+
 import Raft.Config
 import Raft.Event
 import Raft.Logging
@@ -29,7 +59,6 @@ import Raft.NodeState
 import Test.DejaFu.Conc (ConcIO)
 import qualified Test.DejaFu.Types as TDT
 
-import qualified System.Remote.Monitoring as EKG
 import qualified System.Metrics as EKG
 
 --------------------------------------------------------------------------------
@@ -113,15 +142,15 @@ data RaftEnv v m = RaftEnv
 
 newtype RaftT v m a = RaftT
   { unRaftT :: ReaderT (RaftEnv v m) (StateT (RaftNodeState v) m) a
-  } deriving (Functor, Applicative, Monad, MonadReader (RaftEnv v m), MonadState (RaftNodeState v), MonadFail, Alternative, MonadPlus)
+  } deriving newtype (Functor, Applicative, Monad, MonadReader (RaftEnv v m), MonadState (RaftNodeState v), MonadFail, Alternative, MonadPlus)
 
 instance MonadTrans (RaftT v) where
   lift = RaftT . lift . lift
 
-deriving instance MonadIO m => MonadIO (RaftT v m)
-deriving instance MonadThrow m => MonadThrow (RaftT v m)
-deriving instance MonadCatch m => MonadCatch (RaftT v m)
-deriving instance MonadMask m => MonadMask (RaftT v m)
+deriving newtype instance MonadIO m => MonadIO (RaftT v m)
+deriving newtype instance MonadThrow m => MonadThrow (RaftT v m)
+deriving newtype instance MonadCatch m => MonadCatch (RaftT v m)
+deriving newtype instance MonadMask m => MonadMask (RaftT v m)
 
 instance MonadRaftFork m => MonadRaftFork (RaftT v m) where
   type RaftThreadId (RaftT v m) = RaftThreadId m
@@ -168,17 +197,43 @@ runRaftT raftNodeState raftEnv =
 -- Metrics
 ------------------------------------------------------------------------------
 
-data InvalidCmdCounter = InvalidCmdCounter
+data RaftNodeMetrics
+  = RaftNodeMetrics
+  { invalidCmdCounter :: Int64
+  , eventsHandledCounter :: Int64
+  } deriving (Generic, Serialize)
+
+getRaftNodeMetrics :: MonadIO m => RaftT v m RaftNodeMetrics
+getRaftNodeMetrics = do
+    metrics <- Metrics.getMetrics
+    let store = metrics ^. Metrics.metricsStore
+    sample <- liftIO (EKG.sampleAll store)
+    pure RaftNodeMetrics
+      { invalidCmdCounter = lookupCounterValue InvalidCmdCounter sample
+      , eventsHandledCounter = lookupCounterValue EventsHandledCounter sample
+      }
+  where
+    lookupCounterValue :: RaftNodeCounter -> EKG.Sample -> Int64
+    lookupCounterValue counter sample =
+      case HashMap.lookup (show InvalidCmdCounter) sample of
+        Nothing -> 0
+        Just (EKG.Counter n) -> n
+        -- TODO Handle failure in a better way?
+        Just _ -> 0
+
+data RaftNodeCounter
+  = InvalidCmdCounter
+  | EventsHandledCounter
   deriving Show
+
+incrRaftNodeCounter :: MonadIO m => RaftNodeCounter -> RaftT v m ()
+incrRaftNodeCounter = Metrics.increment . show
 
 incrInvalidCmdCounter :: MonadIO m => RaftT v m ()
-incrInvalidCmdCounter = Metrics.increment (show InvalidCmdCounter)
-
-data EventsHandledCounter = EventsHandledCounter
-  deriving Show
+incrInvalidCmdCounter = incrRaftNodeCounter InvalidCmdCounter
 
 incrEventsHandledCounter :: MonadIO m => RaftT v m ()
-incrEventsHandledCounter = Metrics.increment "events.counter" -- (show EventsHandledCounter)
+incrEventsHandledCounter = incrRaftNodeCounter EventsHandledCounter
 
 ------------------------------------------------------------------------------
 -- Logging
