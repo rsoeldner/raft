@@ -352,9 +352,8 @@ handleAction
   -> RaftT v m ()
 handleAction action = do
   logDebug $ "Handling [Action]: " <> show action
-  let sendRPCThread nid rpcMsg = do
-        let threadRole = "SendRPC: " <> toS nid <> " - " <> show rpcMsg
-        void (raftFork (CustomThreadRole threadRole) (lift (sendRPC nid rpcMsg)))
+  let sendRPCThread nid rpcMsg =
+        void (raftFork (CustomThreadRole "Send RPC") (lift (sendRPC nid rpcMsg)))
   case action of
     SendRPC nid sendRpcAction -> do
       rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
@@ -366,9 +365,8 @@ handleAction action = do
     BroadcastRPC nids sendRpcAction -> do
       rpcMsg <- mkRPCfromSendRPCAction sendRpcAction
       let sendRPC' = lift . flip sendRPC rpcMsg
-      forM_ nids $ \nid -> do
-        let threadRole = "RPC Broadcast: " <> toS nid
-        raftFork (CustomThreadRole threadRole) (sendRPC' nid)
+      forM_ nids $ \nid ->
+        raftFork (CustomThreadRole "RPC Broadcast") (sendRPC' nid)
     RespondToClient cid cr -> respondToClient cid cr
     ResetTimeoutTimer tout -> do
       case tout of
