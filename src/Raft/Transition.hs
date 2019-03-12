@@ -101,7 +101,6 @@ type ClientReqHandler ns sm v = Show v => NodeState ns v -> ClientRequest v -> T
 broadcast :: SendRPCAction v -> TransitionM sm v ()
 broadcast sendRPC = do
   selfNodeId <- askNodeId
-  traceShowM "broadcast"
   tellAction =<<
     flip BroadcastRPC sendRPC
       <$> asks (Set.filter (selfNodeId /=) . configNodeIds . nodeConfig)

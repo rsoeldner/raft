@@ -45,33 +45,43 @@ handleAppendEntries (NodeLeaderState ls)_ _  =
   pure (leaderResultState Noop ls)
 
 handleAppendEntriesResponse :: forall sm v. RPCHandler 'Leader sm AppendEntriesResponse v
-handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
-  -- If AppendEntries fails (aerSuccess == False) because of log inconsistency,
-  -- decrement nextIndex and retry
-  | not (aerSuccess appendEntriesResp) = do
+handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp = do
+  newLeaderState <- if aerSuccess appendEntriesResp
+    then do
+      let lsUpdatedIndices = updateMatchAndIncrNextIndex sender ls
+      -- Increment leader commit index if now a majority of followers have
+      -- replicated an entry at a given term.
+      lsUpdatedCommitIdx <- incrCommitIndex lsUpdatedIndices
+      when (lsCommitIndex lsUpdatedCommitIdx > lsCommitIndex lsUpdatedIndices) $
+        updateClientReqCacheFromIdx (lsCommitIndex lsUpdatedIndices)
+      pure lsUpdatedCommitIdx
+    else decrFollowerNextIndexThenRetry
+  case aerReadRequest appendEntriesResp of
+    Nothing -> pure $ leaderResultState Noop newLeaderState
+    Just n -> handleReadReq n newLeaderState
+
+  where
+    -- | Increment nextIndex to send to follower,
+    -- update index of highest log entry replicated on follower
+    updateMatchAndIncrNextIndex :: NodeId -> LeaderState v -> LeaderState v
+    updateMatchAndIncrNextIndex sender ls =
+      let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
+          newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
+          newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
+          -- TODO ^^ is this wrong seeing as it's the latest entry on the leader?
+          -- ( not the latest on the follower, as described in the paper, see fig 2. )
+      in ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }
+
+    -- | If AppendEntries fails (aerSuccess == False) because of log inconsistency,
+    -- decrement nextIndex and retry
+    decrFollowerNextIndexThenRetry = do
       let newNextIndices = Map.adjust decrIndexWithDefault0 sender (lsNextIndex ls)
           newLeaderState = ls { lsNextIndex = newNextIndices }
           Just newNextIndex = Map.lookup sender newNextIndices
-
       aeData <- mkAppendEntriesData newLeaderState (FromIndex newNextIndex)
       send sender (SendAppendEntriesRPC aeData)
-      pure (leaderResultState Noop newLeaderState)
-  | otherwise = do
-      case aerReadRequest appendEntriesResp of
-        Nothing -> leaderResultState Noop <$> do
+      pure newLeaderState
 
-          let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
-              newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
-              newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
-              lsUpdatedIndices = ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }
-          -- Increment leader commit index if now a majority of followers have
-          -- replicated an entry at a given term.
-          lsUpdatedCommitIdx <- incrCommitIndex lsUpdatedIndices
-          when (lsCommitIndex lsUpdatedCommitIdx > lsCommitIndex lsUpdatedIndices) $
-            updateClientReqCacheFromIdx (lsCommitIndex lsUpdatedIndices)
-          pure lsUpdatedCommitIdx
-        Just n -> handleReadReq n ls
-  where
     handleReadReq :: Int -> LeaderState v -> TransitionM sm v (ResultState 'Leader v)
     handleReadReq n leaderState = do
       networkSize <- Set.size <$> asks (configNodeIds . nodeConfig)
@@ -93,7 +103,6 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp
             { lsReadRequest = newReadReqs
             }
         Just (ClientReadReqData cid res) -> do
-	  traceShowM "asd"
           respondClientRead cid res
           pure $ leaderResultState Noop leaderState
             { lsReadReqsHandled = succ (lsReadReqsHandled leaderState)
@@ -125,9 +134,7 @@ handleTimeout (NodeLeaderState ls) timeout =
 -- machine on a client read, and appending an entry to the log on a valid client
 -- write.
 handleClientRequest :: (Show v, Serialize v) => ClientReqHandler 'Leader sm v
-handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) = do
-
-    traceShowM "handleClientRequest"
+handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) =
     case cr of
       ClientReadReq crr ->
         leaderResultState HandleClientReq <$> handleClientReadReq crr
@@ -135,12 +142,8 @@ handleClientRequest (NodeLeaderState ls@LeaderState{..}) (ClientRequest cid cr) 
         leaderResultState HandleClientReq <$> handleClientWriteReq newSerial v
   where
     handleClientReadReq crr = do
-
-      traceShowM "handleClientReadReq"
       heartbeat <- mkAppendEntriesData ls (NoEntries (FromClientReadReq lsReadReqsHandled))
-      traceShowM "handleClientReadReq"
       broadcast (SendAppendEntriesRPC heartbeat)
-      traceShowM "handleClientReadReq"
       let clientReqData = ClientReadReqData cid crr
       pure ls {
         lsReadRequest =

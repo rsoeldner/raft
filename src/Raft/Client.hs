@@ -314,7 +314,6 @@ clientReadFrom
   -> RaftClientT s v m (Either (RaftClientError s v m) (ClientReadResp s v))
 clientReadFrom nid crr = do
   eSend <- clientSendReadTo nid crr
-  traceShowM "clientReadFrom"
   case eSend of
     Left err -> pure (Left (RaftClientSendError err))
     Right _ -> clientRecvRead
@@ -493,14 +492,11 @@ clientRecvRead
   :: (RaftClientSend m v, RaftClientRecv m s v)
   => RaftClientT s v m (Either (RaftClientError s v m) (ClientReadResp s v))
 clientRecvRead = do
-  traceShowM "clientRecvRead"
   eRes <- clientRecv
   case eRes of
     Left err -> do
       pure (Left (RaftClientRecvError err))
     Right cresp -> do
-
-      traceShowM "success clientRecvRead"
       case cresp of
         ClientRedirectResponse crr -> pure (Left (RaftClientUnexpectedRedirect crr))
         ClientWriteResponse cwr -> pure (Left (RaftClientUnexpectedWriteResp cwr))
@@ -512,7 +508,6 @@ clientRecv
   :: RaftClientRecv m s v
   => RaftClientT s v m (Either (RaftClientRecvError m s) (ClientResponse s v))
 clientRecv = do
-  traceShowM "clientRecv"
   ecresp <- raftClientRecv
   case ecresp of
     Left err -> pure (Left err)

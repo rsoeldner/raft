@@ -166,8 +166,6 @@ instance forall m. MonadConc m => RaftSendRPC (RaftTestT m) StoreCmd where
 
 instance MonadConc m => RaftSendClient (RaftTestT m) Store StoreCmd where
   sendClient cid cr = do
-
-    traceShowM cid
     clientRespChans <- asks testClientRespChans
     case Map.lookup cid clientRespChans of
       Nothing -> panic "Failed to find client id in environment"
@@ -248,10 +246,8 @@ instance (MonadConc m, MonadFail m) => RaftClientSend (RaftTestClientT' m) Store
 instance MonadConc m => RaftClientRecv (RaftTestClientT' m) Store StoreCmd where
   type RaftClientRecvError (RaftTestClientT' m) Store = ()
   raftClientRecv = do
-    traceShowM "raftClientRecv"
     clientRespChan <- asks testClientEnvRespChan
     e <- fmap Right $ lift $ atomically $ readTChan clientRespChan
-    traceShowM e
     return e
 
 runRaftTestClientT
@@ -339,16 +335,12 @@ forkTestNodes testEnvs =
 -- no longer be safe to `runRaftTestClientT` on.
 pollForReadResponse :: (MonadConc m, MonadIO m, MonadFail m) => NodeId -> RaftTestClientT m Store
 pollForReadResponse nid = do
-  traceShowM "begin poll for read response"
   eRes <- clientReadFrom nid ClientReadStateMachine
-  traceShowM "clientReadFrom finished"
   case eRes of
     -- TODO Handle other cases of 'ClientReadResp'
     Right (ClientReadRespStateMachine res) -> do
-      traceShowM "successful read store"
       pure res
     e -> do
-      traceShowM "retry"
       liftIO $ Control.Monad.Conc.Class.threadDelay 10000
       pollForReadResponse nid
 

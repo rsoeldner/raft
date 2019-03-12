@@ -47,7 +47,7 @@ import Raft.Client
 import Raft.Log
 import Raft.Monad
 
-dejaFuSettings = defaultSettings { _way = randomly (mkStdGen 42) 1 }
+dejaFuSettings = defaultSettings { _way = randomly (mkStdGen 42) 100 }
 
 test_concurrency :: [TestTree]
 test_concurrency =
@@ -173,9 +173,9 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
       (res, endingNodeStates) <-
         withRaftTestNodes startingNodeStates $ do
           leaderElection node0
+          clientTest
           -- eventChans <- lift $ asks testClientEnvNodeEventChans
           -- lift $ heartbeat (eventChans Map.! node0)
-          clientTest
       pure endingNodeStates
 
 correctResult :: Either Condition TestNodeStates -> Bool
@@ -185,11 +185,6 @@ correctResult (Right testStates) =
 	(fmap testNodeLog $ Map.elems testStates)
   in  length inAgreement > length inDisagreement
 correctResult (Left _) = False
-
-startingStatesConfig = initTestStates[ (node0, Term 4, SampleEntries.entries)
-      , (node1, Term 4, Seq.take 11 SampleEntries.entries)
-      , (node2, Term 4, SampleEntries.entries)
-      ]
 
 test_AEFollower :: TestTree
 test_AEFollower =
