@@ -494,8 +494,7 @@ clientRecvRead
 clientRecvRead = do
   eRes <- clientRecv
   case eRes of
-    Left err -> do
-      pure (Left (RaftClientRecvError err))
+    Left err -> pure (Left (RaftClientRecvError err))
     Right cresp -> do
       case cresp of
         ClientRedirectResponse crr -> pure (Left (RaftClientUnexpectedRedirect crr))
