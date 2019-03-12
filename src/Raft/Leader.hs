@@ -52,10 +52,12 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp = d
       -- Increment leader commit index if now a majority of followers have
       -- replicated an entry at a given term.
       lsUpdatedCommitIdx <- incrCommitIndex lsUpdatedIndices
+
       when (lsCommitIndex lsUpdatedCommitIdx > lsCommitIndex lsUpdatedIndices) $
         updateClientReqCacheFromIdx (lsCommitIndex lsUpdatedIndices)
       pure lsUpdatedCommitIdx
     else decrFollowerNextIndexThenRetry
+
   case aerReadRequest appendEntriesResp of
     Nothing -> pure $ leaderResultState Noop newLeaderState
     Just n -> handleReadReq n newLeaderState
@@ -64,10 +66,10 @@ handleAppendEntriesResponse ns@(NodeLeaderState ls) sender appendEntriesResp = d
     -- | Increment nextIndex to send to follower,
     -- update index of highest log entry replicated on follower
     updateMatchAndIncrNextIndex :: NodeId -> LeaderState v -> LeaderState v
-    updateMatchAndIncrNextIndex sender ls =
-      let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry ls)
-          newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex ls)
-          newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex ls)
+    updateMatchAndIncrNextIndex sender leaderState =
+      let lastLogEntryIdx = lastLogEntryIndex (lsLastLogEntry leaderState)
+          newNextIndices = Map.insert sender (lastLogEntryIdx + 1) (lsNextIndex leaderState)
+          newMatchIndices = Map.insert sender lastLogEntryIdx (lsMatchIndex leaderState)
           -- TODO ^^ is this wrong seeing as it's the latest entry on the leader?
           -- ( not the latest on the follower, as described in the paper, see fig 2. )
       in ls { lsNextIndex = newNextIndices, lsMatchIndex = newMatchIndices }

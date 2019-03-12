@@ -82,7 +82,7 @@ leaderElectionTest nid = leaderElection nid
 
 incrValue :: RaftTestClientM (Store, Index)
 incrValue = do
-  leaderElection' node0
+  leaderElection node0
   Right idx <- do
     syncClientWrite node0 (Set "x" 41)
     syncClientWrite node0 (Incr "x")
@@ -91,7 +91,7 @@ incrValue = do
 
 multIncrValue :: RaftTestClientM (Store, Index)
 multIncrValue = do
-    leaderElection' node0
+    leaderElection node0
     syncClientWrite node0 (Set "x" 0)
     Right idx <-
       fmap (Maybe.fromJust . lastMay) $
@@ -109,34 +109,34 @@ followerRedirNoLeader = leaderRedirect
 
 followerRedirLeader :: RaftTestClientM CurrentLeader
 followerRedirLeader = do
-    leaderElection' node0
+    leaderElection node0
     leaderRedirect
 
 newLeaderElection :: RaftTestClientM CurrentLeader
 newLeaderElection = do
-    leaderElection' node0
-    leaderElection' node1
-    leaderElection' node2
-    leaderElection' node1
+    leaderElection node0
+    leaderElection node1
+    leaderElection node2
+    leaderElection node1
     Left ldr <- syncClientRead node0
     pure ldr
 
 comprehensive :: RaftTestClientT ConcIO (Index, Store, CurrentLeader)
 comprehensive = do
-    leaderElection' node0
+    leaderElection node0
     Right idx2 <- syncClientWrite node0 (Set "x" 7)
     Right idx3 <- syncClientWrite node0 (Set "y" 3)
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
     Right _ <- syncClientRead node0
 
-    leaderElection' node1
+    leaderElection node1
     Right idx5 <- syncClientWrite node1 (Incr "x")
     Right idx6 <- syncClientWrite node1 (Incr "y")
     Right idx7 <- syncClientWrite node1 (Set "z" 40)
     Left (CurrentLeader _) <- syncClientWrite node2 (Incr "y")
     Right _ <- syncClientRead node1
 
-    leaderElection' node2
+    leaderElection node2
     Right idx9 <- syncClientWrite node2 (Incr "z")
     Right idx10 <- syncClientWrite node2 (Incr "x")
     Left _ <- syncClientWrite node1 (Set "q" 100)
@@ -146,7 +146,7 @@ comprehensive = do
     Left (CurrentLeader _) <- syncClientWrite node0 (Incr "y")
     Right _ <- syncClientRead node2
 
-    leaderElection' node0
+    leaderElection node0
     Right idx14 <- syncClientWrite node0 (Incr "z")
     Left (CurrentLeader _) <- syncClientWrite node1 (Incr "y")
 
@@ -174,8 +174,6 @@ majorityNodeStatesEqual clientTest startingStatesConfig  =
         withRaftTestNodes startingNodeStates $ do
           leaderElection node0
           clientTest
-          -- eventChans <- lift $ asks testClientEnvNodeEventChans
-          -- lift $ heartbeat (eventChans Map.! node0)
       pure endingNodeStates
 
 correctResult :: Either Condition TestNodeStates -> Bool
@@ -217,7 +215,7 @@ test_AEFollowerBehindMultipleTerms =
     ]
 
 --prop_AEFollowerBehind :: Small (Positive Integer) -> Small (Positive Integer) -> Bool
---prop_AEFollowerBehind (Small (Positive numEntriesPerTerm)) numTerms = majorityNodeStatesEqual (leaderElection' node0)
+--prop_AEFollowerBehind (Small (Positive numEntriesPerTerm)) numTerms = majorityNodeStatesEqual (leaderElection node0)
     --[ (node0, Term 4, entries)
     --, (node1, Term 2, entries)
     --, (node2, Term 4, entries)
