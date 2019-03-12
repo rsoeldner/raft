@@ -25,7 +25,7 @@ import Raft.Config
 import Raft.Event
 import Raft.Log
 import Raft.Persistent
-import Raft.Monad
+import Raft.Metrics (RaftNodeMetrics)
 import Raft.NodeState
 import Raft.RPC
 import Raft.Types
@@ -94,7 +94,7 @@ askPeerNodeIds = do
 
 type RPCHandler ns sm r v = (RPCType r v, Show v) => NodeState ns v -> NodeId -> r -> TransitionM sm v (ResultState ns v)
 type TimeoutHandler ns sm v = Show v => NodeState ns v -> Timeout -> TransitionM sm v (ResultState ns v)
-type ClientReqHandler ns sm v = Show v => NodeState ns v -> ClientRequest v -> TransitionM sm v (ResultState ns v)
+type ClientReqHandler ns cr sm v = (ClientReqType cr v, Show v) => NodeState ns v -> ClientId -> cr -> TransitionM sm v (ResultState ns v)
 
 --------------------------------------------------------------------------------
 -- RWS Helpers
@@ -135,6 +135,10 @@ respondClientRead clientId readReq = do
 respondClientWrite :: ClientId -> Index -> SerialNum -> TransitionM sm v ()
 respondClientWrite cid entryIdx sn =
   tellAction (RespondToClient cid (ClientWriteRespSpec (ClientWriteRespSpecSuccess entryIdx sn)))
+
+respondClientMetrics :: ClientId -> TransitionM sm v ()
+respondClientMetrics cid =
+  tellAction . RespondToClient cid . ClientMetricsRespSpec =<< asks nodeMetrics
 
 respondClientRedir :: ClientId -> CurrentLeader -> TransitionM sm v ()
 respondClientRedir cid cl =

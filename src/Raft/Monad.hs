@@ -24,10 +24,6 @@ module Raft.Monad (
 , RaftT
 , runRaftT
 
-, RaftNodeMetrics
-, getRaftNodeMetrics
-, incrInvalidCmdCounter
-, incrEventsHandledCounter
 
 , Raft.Monad.logInfo
 , Raft.Monad.logDebug
@@ -46,11 +42,6 @@ import qualified Control.Monad.Conc.Class as Conc
 
 import Control.Concurrent.Classy.STM.TChan
 
-import qualified Data.HashMap.Strict as HashMap
-import Data.Serialize (Serialize)
-
-import Lens.Micro ((^.))
-
 import Raft.Config
 import Raft.Event
 import Raft.Logging
@@ -58,8 +49,6 @@ import Raft.NodeState
 
 import Test.DejaFu.Conc (ConcIO)
 import qualified Test.DejaFu.Types as TDT
-
-import qualified System.Metrics as EKG
 
 --------------------------------------------------------------------------------
 -- Raft Monad Class
@@ -192,48 +181,6 @@ runRaftT
   -> m a
 runRaftT raftNodeState raftEnv =
   flip evalStateT raftNodeState . flip runReaderT raftEnv . unRaftT
-
-------------------------------------------------------------------------------
--- Metrics
-------------------------------------------------------------------------------
-
-data RaftNodeMetrics
-  = RaftNodeMetrics
-  { invalidCmdCounter :: Int64
-  , eventsHandledCounter :: Int64
-  } deriving (Generic, Serialize)
-
-getRaftNodeMetrics :: MonadIO m => RaftT v m RaftNodeMetrics
-getRaftNodeMetrics = do
-    metrics <- Metrics.getMetrics
-    let store = metrics ^. Metrics.metricsStore
-    sample <- liftIO (EKG.sampleAll store)
-    pure RaftNodeMetrics
-      { invalidCmdCounter = lookupCounterValue InvalidCmdCounter sample
-      , eventsHandledCounter = lookupCounterValue EventsHandledCounter sample
-      }
-  where
-    lookupCounterValue :: RaftNodeCounter -> EKG.Sample -> Int64
-    lookupCounterValue counter sample =
-      case HashMap.lookup (show InvalidCmdCounter) sample of
-        Nothing -> 0
-        Just (EKG.Counter n) -> n
-        -- TODO Handle failure in a better way?
-        Just _ -> 0
-
-data RaftNodeCounter
-  = InvalidCmdCounter
-  | EventsHandledCounter
-  deriving Show
-
-incrRaftNodeCounter :: MonadIO m => RaftNodeCounter -> RaftT v m ()
-incrRaftNodeCounter = Metrics.increment . show
-
-incrInvalidCmdCounter :: MonadIO m => RaftT v m ()
-incrInvalidCmdCounter = incrRaftNodeCounter InvalidCmdCounter
-
-incrEventsHandledCounter :: MonadIO m => RaftT v m ()
-incrEventsHandledCounter = incrRaftNodeCounter EventsHandledCounter
 
 ------------------------------------------------------------------------------
 -- Logging

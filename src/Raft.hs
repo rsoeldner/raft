@@ -107,9 +107,6 @@ import Protolude hiding (STM, TChan, newRaftChan, readBoundedChan, writeBoundedC
 
 import Control.Concurrent.STM.Timer
 
-import qualified Control.Monad.Metrics as Metrics
-import qualified Control.Monad.Metrics.Internal as Metrics
-
 import Control.Monad.Fail
 import Control.Monad.Catch
 
@@ -124,6 +121,11 @@ import Raft.Config
 import Raft.Event
 import Raft.Handle
 import Raft.Monad
+import Raft.Metrics
+  ( getMetricsStore
+  , getRaftNodeMetrics
+  , incrInvalidCmdCounter
+  , incrEventsHandledCounter)
 import Raft.Log
 import Raft.Logging hiding (logInfo, logDebug, logCritical, logAndPanic)
 import Raft.Transition hiding (logInfo, logDebug)
@@ -183,8 +185,8 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
       Nothing -> pure ()
       Just port -> do
         logInfo ("Forking metrics server on port " <> show port <> "...")
-        store <- Metrics._metricsStore <$> Metrics.getMetrics
-        void $ liftIO (EKG.forkServerWith store "localhost" (fromIntegral port ))
+        metricsStore <- getMetricsStore
+        void $ liftIO (EKG.forkServerWith metricsStore "localhost" (fromIntegral port))
 
     logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
 
@@ -260,7 +262,7 @@ handleEventLoop initStateMachine = do
           case event of
             MessageEvent (ClientRequestEvent (ClientRequest cid creq)) ->
               case creq of
-                ClientWriteReq serial cmd -> do
+                ClientWriteReq (ClientCmdReq serial cmd) -> do
                   eRes <- lift (applyLogCmd MonadicValidation stateMachine cmd)
                   case eRes of
                     Left err -> do

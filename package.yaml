@@ -55,7 +55,6 @@ dependencies:
 - monad-metrics
 - ekg
 - ekg-core
-- microlens
 
 default-extensions:
   NoImplicitPrelude
