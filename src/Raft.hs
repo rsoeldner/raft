@@ -121,11 +121,6 @@ import Raft.Config
 import Raft.Event
 import Raft.Handle
 import Raft.Monad
-import Raft.Metrics
-  ( getMetricsStore
-  , getRaftNodeMetrics
-  , incrInvalidCmdCounter
-  , incrEventsHandledCounter)
 import Raft.Log
 import Raft.Logging hiding (logInfo, logDebug, logCritical, logAndPanic)
 import Raft.Transition hiding (logInfo, logDebug)
@@ -134,6 +129,7 @@ import Raft.Persistent
 import Raft.RPC
 import Raft.StateMachine
 import Raft.Types
+import qualified Raft.Metrics as Metrics
 
 import qualified System.Remote.Monitoring as EKG
 
@@ -185,7 +181,7 @@ runRaftNode nodeConfig@RaftNodeConfig{..} optConfig logCtx initStateMachine = do
       Nothing -> pure ()
       Just port -> do
         logInfo ("Forking metrics server on port " <> show port <> "...")
-        metricsStore <- getMetricsStore
+        metricsStore <- Metrics.getMetricsStore
         void $ liftIO (EKG.forkServerWith metricsStore "localhost" (fromIntegral port))
 
     logInfo ("Initialized election timer with seed " <> show timerSeed <> "...")
@@ -268,7 +264,7 @@ handleEventLoop initStateMachine = do
                     Left err -> do
                       -- Increments the number of invalid commands seen during
                       -- the lifetime of this node.
-                      incrInvalidCmdCounter
+                      Metrics.incrInvalidCmdCounter
                       let clientWriteRespSpec = ClientWriteRespSpec (ClientWriteRespSpecFail serial err)
                           clientFailRespAction = RespondToClient cid clientWriteRespSpec
                       handleAction clientFailRespAction
@@ -282,12 +278,16 @@ handleEventLoop initStateMachine = do
     handleEventLoop' :: sm -> PersistentState -> RaftT v m ()
     handleEventLoop' stateMachine persistentState = do
 
-      incrEventsHandledCounter
+      Metrics.incrEventsHandledCounter
 
       mRes <-
         withValidatedEvent stateMachine $ \event -> do
           loadLogEntryTermAtAePrevLogIndex event
           raftNodeState <- get
+
+          -- Set the RaftNodeStateLabel metric
+          Metrics.setRaftNodeStateLabel (nodeMode raftNodeState)
+
           logDebug $ "[Event]: " <> show event
           logDebug $ "[NodeState]: " <> show raftNodeState
           logDebug $ "[State Machine]: " <> show stateMachine
@@ -295,7 +295,7 @@ handleEventLoop initStateMachine = do
 
           -- Perform core state machine transition, handling the current event
           nodeConfig <- asks raftNodeConfig
-          raftNodeMetrics <- getRaftNodeMetrics
+          raftNodeMetrics <- Metrics.getRaftNodeMetrics
           let transitionEnv = TransitionEnv nodeConfig stateMachine raftNodeState raftNodeMetrics
           pure (Raft.Handle.handleEvent raftNodeState transitionEnv persistentState event)
 

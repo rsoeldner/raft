@@ -5,6 +5,7 @@ module Raft.Metrics
 ( RaftNodeMetrics
 , getMetricsStore
 , getRaftNodeMetrics
+, setRaftNodeStateLabel
 , incrInvalidCmdCounter
 , incrEventsHandledCounter
 ) where
@@ -19,6 +20,8 @@ import Data.Serialize (Serialize)
 
 import qualified System.Metrics as EKG
 
+import Raft.Types (Mode(..))
+
 ------------------------------------------------------------------------------
 -- Raft Node Metrics
 ------------------------------------------------------------------------------
@@ -27,6 +30,7 @@ data RaftNodeMetrics
   = RaftNodeMetrics
   { invalidCmdCounter :: Int64
   , eventsHandledCounter :: Int64
+  , nodeStateLabel :: [Char]
   } deriving (Show, Generic, Serialize)
 
 getMetricsStore :: (MonadIO m, Metrics.MonadMetrics m) => m EKG.Store
@@ -39,20 +43,47 @@ getRaftNodeMetrics = do
   pure RaftNodeMetrics
     { invalidCmdCounter = lookupCounterValue InvalidCmdCounter sample
     , eventsHandledCounter = lookupCounterValue EventsHandledCounter sample
+    , nodeStateLabel = toS (lookupLabelValue RaftNodeStateLabel sample)
     }
 
-lookupCounterValue :: RaftNodeCounter -> EKG.Sample -> Int64
-lookupCounterValue counter sample =
-  case HashMap.lookup (show InvalidCmdCounter) sample of
-    Nothing -> 0
-    Just (EKG.Counter n) -> n
+--------------------------------------------------------------------------------
+-- Labels
+--------------------------------------------------------------------------------
+
+data RaftNodeLabel
+  = RaftNodeStateLabel
+  deriving Show
+
+lookupLabelValue :: RaftNodeLabel -> EKG.Sample -> Text
+lookupLabelValue label sample =
+  case HashMap.lookup (show label) sample of
+    Just (EKG.Label text) -> text
     -- TODO Handle failure in a better way?
-    Just _ -> 0
+    Nothing -> ""
+    Just _ -> ""
+
+setRaftNodeLabel :: (MonadIO m, Metrics.MonadMetrics m) => RaftNodeLabel -> Mode -> m ()
+setRaftNodeLabel label = Metrics.label (show label) . show
+
+setRaftNodeStateLabel :: (MonadIO m, Metrics.MonadMetrics m) => Mode -> m ()
+setRaftNodeStateLabel = setRaftNodeLabel RaftNodeStateLabel
+
+--------------------------------------------------------------------------------
+-- Counters
+--------------------------------------------------------------------------------
 
 data RaftNodeCounter
   = InvalidCmdCounter
   | EventsHandledCounter
   deriving Show
+
+lookupCounterValue :: RaftNodeCounter -> EKG.Sample -> Int64
+lookupCounterValue counter sample =
+  case HashMap.lookup (show counter) sample of
+    Nothing -> 0
+    Just (EKG.Counter n) -> n
+    -- TODO Handle failure in a better way?
+    Just _ -> 0
 
 incrRaftNodeCounter :: (MonadIO m, Metrics.MonadMetrics m) => RaftNodeCounter -> m ()
 incrRaftNodeCounter = Metrics.increment . show
