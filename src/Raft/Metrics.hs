@@ -23,7 +23,7 @@ import Data.Serialize (Serialize)
 
 import qualified System.Metrics as EKG
 
-import Raft.Log (LastLogEntry, EntryHash(..), hashLastLogEntry)
+import Raft.Log (LastLogEntry, EntryHash(..), hashLastLogEntry, genesisHash)
 import Raft.Types (Index, Mode(..))
 
 ------------------------------------------------------------------------------
@@ -51,7 +51,7 @@ getRaftNodeMetrics = do
     { invalidCmdCounter = lookupCounterValue InvalidCmdCounter sample
     , eventsHandledCounter = lookupCounterValue EventsHandledCounter sample
     , nodeStateLabel = toS (lookupLabelValue NodeStateLabel sample)
-    , lastLogHashLabel = toS (lookupLabelValue LastLogEntryHashLabel sample)
+    , lastLogHashLabel = toS (lookupLastLogEntryHashLabel sample)
     , lastLogIndexGauge = lookupGaugeValue LastLogEntryIndexGauge sample
     , commitIndexGauge = lookupGaugeValue CommitIndexGauge sample
     }
@@ -87,6 +87,12 @@ setLastLogEntryHashLabel
   => LastLogEntry v
   -> m ()
 setLastLogEntryHashLabel = setRaftNodeLabel LastLogEntryHashLabel . toS . unEntryHash . hashLastLogEntry
+
+lookupLastLogEntryHashLabel :: EKG.Sample -> Text
+lookupLastLogEntryHashLabel sample =
+    case HashMap.lookup (show LastLogEntryHashLabel) sample of
+      Just (EKG.Label hashAsText) -> hashAsText
+      _ -> toS . unEntryHash $ genesisHash
 
 --------------------------------------------------------------------------------
 -- Gauges
